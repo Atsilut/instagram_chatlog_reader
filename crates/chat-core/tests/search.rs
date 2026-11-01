@@ -179,7 +179,10 @@ fn similar_words_can_be_turned_off() {
 
     let mut typo = q("kove");
     typo.similar_words = false;
-    assert!(texts(&lib, &index, typo).contains(&"I love that polite cat".to_string()));
+    assert!(
+        texts(&lib, &index, typo).is_empty(),
+        "simple typos need the option"
+    );
 }
 
 #[test]

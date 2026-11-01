@@ -327,8 +327,8 @@ impl SearchIndex {
         Some(Box::new(BooleanQuery::new(clauses)))
     }
 
-    /// The word and its common typos. With `similar`, also its forms and typos of them.
-    /// Korean words may carry a particle.
+    /// The word itself. With `similar`, also its forms and simple typos.
+    /// Korean words may carry a particle either way.
     fn word_query(&self, word: &str, similar: bool) -> Box<dyn Query> {
         let hangul = word.chars().any(is_hangul_jamo);
         let one = |w: &str| -> Box<dyn Query> {
@@ -339,7 +339,9 @@ impl SearchIndex {
                 Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs))
             }
         };
-        let mut terms = if hangul || !similar {
+        let mut terms = if !similar {
+            vec![word.to_string()]
+        } else if hangul {
             let mut terms = common_typos(word);
             terms.push(word.to_string());
             terms

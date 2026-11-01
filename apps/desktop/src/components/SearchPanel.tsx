@@ -234,7 +234,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           />
           <span>Include similar words</span>
           <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
-            On: searching "love" also finds "loved", "have loved", "had loved" and typos such as "lovef" and "havr loved". Off: the normal search finds "love" and close typos such as "kove" only. "loved" and "lovely" then show up with deep search.
+            On: the normal search also finds similar verb variations and simple typos. Searching "love" finds "loved", "have loved" and "kove". Off: the normal search only finds the exact word. Searching "love" finds "love", not "loved" or "kove". Capitals and accents still match, so "Café" finds "cafe". "lovely" always needs deep search.
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1 text-sm">
