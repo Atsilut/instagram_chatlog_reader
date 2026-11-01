@@ -320,6 +320,41 @@ fn media_is_linked_and_missing_files_are_filled_in_later() {
 }
 
 #[test]
+fn owner_and_counts_are_saved_page_by_page() {
+    let tmp = tempfile::tempdir().unwrap();
+    let export = write_export(tmp.path(), "2025-07-04", "Joy", &base_chat(), 2, &[]);
+    let mut lib = library(tmp.path());
+    let db = lib.root().join("library.db");
+    let seen = std::sync::Mutex::new(Vec::new());
+    let progress = |_: &chat_core::import::Progress| {
+        // A second connection sees what an interrupted import would leave behind.
+        let c = rusqlite::Connection::open(&db).unwrap();
+        let state: (i64, i64, i64) = c
+            .query_row(
+                "SELECT t.message_count, (SELECT COUNT(*) FROM messages),
+                        (SELECT COUNT(*) FROM participants WHERE is_owner = 1 AND display_name = 'Bob')
+                 FROM threads t",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        seen.lock().unwrap().push(state);
+    };
+    let opts = ImportOptions {
+        cancel: None,
+        progress: Some(&progress),
+    };
+    import(&mut lib, &[export], &opts).unwrap();
+
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.len(), 3);
+    for (count, actual, owners) in seen {
+        assert_eq!(count, actual, "message_count matches after every page");
+        assert_eq!(owners, 1, "owner is marked from the first page");
+    }
+}
+
+#[test]
 fn cancel_stops_before_the_next_batch() {
     let tmp = tempfile::tempdir().unwrap();
     let export = write_export(tmp.path(), "2025-07-04", "Joy", &base_chat(), 1, &[]);

@@ -181,6 +181,53 @@ fn messages_carry_media_reactions_and_missing_flag() {
 }
 
 #[test]
+fn owner_can_be_corrected() {
+    let tmp = tempfile::tempdir().unwrap();
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "joy_111",
+        "Joy",
+        &day_chat("x", 2),
+        10,
+        &[],
+    );
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[export]);
+    let t = &query::threads(lib.conn()).unwrap()[0];
+    let joy = t.participants.iter().find(|p| !p.is_owner).unwrap();
+
+    query::set_owner(lib.conn(), joy.id).unwrap();
+    let after = query::participants(lib.conn(), t.id).unwrap();
+    assert_eq!(
+        after
+            .iter()
+            .filter(|p| p.is_owner)
+            .map(|p| p.id)
+            .collect::<Vec<_>>(),
+        vec![joy.id]
+    );
+
+    run(
+        &mut lib,
+        &[write_chat(
+            tmp.path(),
+            "2025-08-02",
+            "joy_111",
+            "Joy",
+            &day_chat("x", 3),
+            10,
+            &[],
+        )],
+    );
+    let again = query::participants(lib.conn(), t.id).unwrap();
+    assert!(
+        again.iter().find(|p| p.id == joy.id).unwrap().is_owner,
+        "re-import keeps the manual choice"
+    );
+}
+
+#[test]
 fn aliases_can_be_set_and_cleared() {
     let tmp = tempfile::tempdir().unwrap();
     let export = write_chat(

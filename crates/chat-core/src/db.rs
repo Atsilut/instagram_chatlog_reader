@@ -11,6 +11,7 @@ use crate::{Error, Result};
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_init.sql"),
     include_str!("../migrations/0002_merge.sql"),
+    include_str!("../migrations/0003_repair_owner_counts.sql"),
 ];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
