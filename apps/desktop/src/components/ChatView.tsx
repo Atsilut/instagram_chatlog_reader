@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { useApi, type MessageView, type ParticipantInfo, type ThreadSummary } from "../api";
 import { avatarColor, dayNumber, formatDay, formatFullStamp, formatStamp, initials, personName, threadTitle } from "../lib/format";
+import { useDisplaySettings } from "../lib/settings";
 import { Lightbox, Part } from "./Parts";
 
 const PAGE = 150;
@@ -53,6 +54,7 @@ interface Props {
 
 export function ChatView({ thread, target, jumpNonce, onPeople, onSearch, onLatest }: Props) {
   const api = useApi();
+  useDisplaySettings();
   const [msgs, setMsgs] = useState<MessageView[]>([]);
   const [firstIndex, setFirstIndex] = useState(START_INDEX);
   const [initialIndex, setInitialIndex] = useState<number | null>(null);

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useApi, type DeepProgress, type HitView, type IndexProgress, type SearchFilters, type SearchOrder, type ThreadSummary } from "../api";
 import { formatStamp, personName, threadTitle } from "../lib/format";
+import { useDisplaySettings } from "../lib/settings";
 
 const PAGE = 50;
 const DEBOUNCE_MS = 300;
@@ -13,8 +14,6 @@ const FEW_RESULTS = 5;
 
 interface Props {
   threads: ThreadSummary[];
-  current: ThreadSummary | null;
-  initialScope: "chat" | "all";
   /** Opens a chat centred on a message. */
   onOpen: (threadId: number, sortKey: number) => void;
   onClose: () => void;
@@ -34,11 +33,10 @@ function dateToMinute(date: string, endOfDay: boolean): number | null {
   return Date.UTC(y, m - 1, d) / 60_000 + (endOfDay ? 1439 : 0);
 }
 
-export function SearchPanel({ threads, current, initialScope, onOpen, onClose }: Props) {
+export function SearchPanel({ threads, onOpen, onClose }: Props) {
   const api = useApi();
+  useDisplaySettings();
   const [text, setText] = useState("");
-  const [scope, setScope] = useState<"chat" | "all">(current ? initialScope : "all");
-  const [participant, setParticipant] = useState<number | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [deepMode, setDeepMode] = useState(false);
@@ -58,22 +56,17 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
   loaded.current = hits.length;
 
   const threadsById = useMemo(() => new Map(threads.map((t) => [t.id, t])), [threads]);
-  const chat = scope === "chat" ? current : null;
   const query = text.trim();
 
   const filters: SearchFilters = useMemo(
     () => ({
-      threadId: chat?.id ?? null,
-      participantId: chat ? participant : null,
       fromMinute: dateToMinute(from, false),
       toMinute: dateToMinute(to, true),
     }),
-    [chat, participant, from, to],
+    [from, to],
   );
 
   useEffect(() => input.current?.focus(), []);
-  useEffect(() => setScope(current ? initialScope : "all"), [initialScope, current]);
-  useEffect(() => setParticipant(null), [chat?.id]);
 
   const toggleDeep = (on: boolean) => {
     setDeepMode(on);
@@ -263,21 +256,6 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           </span>
         </label>
         <div className="flex gap-2 text-xs">
-          <Select value={scope} onChange={(v) => setScope(v as "chat" | "all")}>
-            {current && <option value="chat">This chat</option>}
-            <option value="all">All chats</option>
-          </Select>
-          {chat && (
-            <Select value={participant === null ? "" : String(participant)} onChange={(v) => setParticipant(v ? Number(v) : null)}>
-              <option value="">Anyone</option>
-              {chat.participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {personName(p)}
-                  {p.isOwner ? " (you)" : ""}
-                </option>
-              ))}
-            </Select>
-          )}
           <Select value={order} onChange={(v) => setOrder(v as SearchOrder)}>
             {deepMode && <option value="bestMatch">Best match</option>}
             <option value="oldest">Oldest first</option>
@@ -332,7 +310,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           </div>
         )}
         {hits.map((h) => (
-          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat={!chat} terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
+          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
         ))}
         {total !== null && hits.length < total && (
           <button

@@ -1,38 +1,53 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type { ParticipantInfo, ThreadSummary } from "../api";
+import { getDisplaySettings, type AppLanguage, type TimeStyle } from "./settings";
 
 export const SEQ_PER_MINUTE = 10_000;
 
 // Export times are wall-clock times without a timezone, stored as if UTC. Formatting
 // in UTC shows them exactly as Instagram printed them.
-const dayFmt = new Intl.DateTimeFormat(undefined, {
-  weekday: "long",
-  year: "numeric",
-  month: "long",
-  day: "numeric",
-  timeZone: "UTC",
-});
-const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", timeZone: "UTC" });
-const shortDateFmt = new Intl.DateTimeFormat(undefined, { year: "2-digit", month: "numeric", day: "numeric", timeZone: "UTC" });
+const LOCALE: Record<AppLanguage, string> = { en: "en", ko: "ko", ja: "ja", es: "es" };
 
 export const minuteDate = (tsMinute: number) => new Date(tsMinute * 60_000);
 export const dayNumber = (tsMinute: number) => Math.floor(tsMinute / 1440);
-export const formatDay = (tsMinute: number) => dayFmt.format(minuteDate(tsMinute));
-export const formatTime = (tsMinute: number) => timeFmt.format(minuteDate(tsMinute));
-export const formatShortDate = (tsMinute: number) => shortDateFmt.format(minuteDate(tsMinute));
 export const sortKeyMinute = (sortKey: number) => Math.floor(sortKey / SEQ_PER_MINUTE);
 
-const monthDayTimeFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
-const fullStampFmt = new Intl.DateTimeFormat(undefined, {
-  year: "numeric",
-  month: "short",
-  day: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  timeZone: "UTC",
-});
-const monthDayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+type DateParts = Record<string, string>;
+
+function dateParts(date: Date, language: AppLanguage, timeStyle: TimeStyle): DateParts {
+  const parts: DateParts = {};
+  for (const part of new Intl.DateTimeFormat(LOCALE[language], {
+    weekday: "long",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hourCycle: timeStyle === "uk" ? "h23" : "h12",
+    timeZone: "UTC",
+  }).formatToParts(date)) {
+    if (part.type !== "literal") parts[part.type] = part.value;
+  }
+  return parts;
+}
+
+function clock(parts: DateParts): string {
+  const time = `${parts.hour}:${parts.minute}`;
+  if (!parts.dayPeriod) return time;
+  return /^[A-Za-z]/.test(parts.dayPeriod) ? `${time} ${parts.dayPeriod}` : `${parts.dayPeriod} ${time}`;
+}
+
+function dateText(parts: DateParts, style: TimeStyle, language: AppLanguage, withYear: boolean): string {
+  const { month, day, year } = parts;
+  if (style === "kr") {
+    if (language === "ko") return withYear ? `${year}년 ${month} ${day}일` : `${month} ${day}일`;
+    if (language === "ja") return withYear ? `${year}年${month}${day}日` : `${month}${day}日`;
+    return withYear ? `${year}. ${month} ${day}` : `${month} ${day}`;
+  }
+  if (style === "us") return withYear ? `${month} ${day}, ${year}` : `${month} ${day}`;
+  return withYear ? `${day} ${month} ${year}` : `${day} ${month}`;
+}
 
 /** The local wall clock now, in the same "minutes as if UTC" form as message times. */
 function nowMinute(): number {
@@ -44,22 +59,45 @@ function sameYear(a: Date, b: Date) {
   return a.getUTCFullYear() === b.getUTCFullYear();
 }
 
+function rendered(tsMinute: number, withDate: boolean, withYear: boolean, withWeekday: boolean): string {
+  const { language, timeStyle } = getDisplaySettings();
+  const parts = dateParts(minuteDate(tsMinute), language, timeStyle);
+  const time = clock(parts);
+  if (!withDate) return time;
+  const date = dateText(parts, timeStyle, language, withYear);
+  const dated = withWeekday && parts.weekday ? `${parts.weekday}, ${date}` : date;
+  return `${dated}, ${time}`;
+}
+
 /** Message time: only the time for today, month and day for this year, the full date otherwise. */
 export function formatStamp(tsMinute: number): string {
   const now = nowMinute();
-  if (dayNumber(tsMinute) === dayNumber(now)) return formatTime(tsMinute);
-  if (sameYear(minuteDate(tsMinute), minuteDate(now))) return monthDayTimeFmt.format(minuteDate(tsMinute));
-  return fullStampFmt.format(minuteDate(tsMinute));
+  if (dayNumber(tsMinute) === dayNumber(now)) return rendered(tsMinute, false, false, false);
+  return rendered(tsMinute, true, !sameYear(minuteDate(tsMinute), minuteDate(now)), false);
 }
 
-export const formatFullStamp = (tsMinute: number) => fullStampFmt.format(minuteDate(tsMinute));
+export const formatFullStamp = (tsMinute: number) => rendered(tsMinute, true, true, false);
 
-/** Chat list date: the time for today, month and day for this year, a short full date otherwise. */
+/** Day separator: weekday and the full date, without the time. */
+export function formatDay(tsMinute: number): string {
+  const { language, timeStyle } = getDisplaySettings();
+  const parts = dateParts(minuteDate(tsMinute), language, timeStyle);
+  const date = dateText(parts, timeStyle, language, true);
+  return parts.weekday ? `${parts.weekday}, ${date}` : date;
+}
+
+/** Chat list date: the time for today, month and day for this year, the full date otherwise. */
 export function formatListDate(tsMinute: number): string {
   const now = nowMinute();
-  if (dayNumber(tsMinute) === dayNumber(now)) return formatTime(tsMinute);
-  if (sameYear(minuteDate(tsMinute), minuteDate(now))) return monthDayFmt.format(minuteDate(tsMinute));
-  return formatShortDate(tsMinute);
+  if (dayNumber(tsMinute) === dayNumber(now)) return rendered(tsMinute, false, false, false);
+  const { language, timeStyle } = getDisplaySettings();
+  return dateText(dateParts(minuteDate(tsMinute), language, timeStyle), timeStyle, language, !sameYear(minuteDate(tsMinute), minuteDate(now)));
+}
+
+/** A fixed afternoon, so the settings screen can show what a style looks like. */
+export function formatSample(language: AppLanguage, timeStyle: TimeStyle): string {
+  const parts = dateParts(new Date(Date.UTC(2025, 6, 18, 14, 15)), language, timeStyle);
+  return `${dateText(parts, timeStyle, language, true)}, ${clock(parts)}`;
 }
 
 export function personName(p: ParticipantInfo | undefined): string {

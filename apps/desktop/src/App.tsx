@@ -7,6 +7,7 @@ import { ImportDialog, type ImportState } from "./components/ImportDialog";
 import { Button } from "./components/Modal";
 import { PeopleDialog } from "./components/PeopleDialog";
 import { SearchPanel } from "./components/SearchPanel";
+import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
 
 /** How often the chat list refreshes while an import is running. */
@@ -19,7 +20,8 @@ export default function App() {
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [importVisible, setImportVisible] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
-  const [search, setSearch] = useState<{ scope: "chat" | "all" } | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [jump, setJump] = useState<{ threadId: number; sortKey: number; nonce: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastRefresh = useRef(0);
@@ -28,7 +30,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
-        setSearch({ scope: e.shiftKey ? "all" : "chat" });
+        setSearchOpen(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -103,6 +105,7 @@ export default function App() {
             selected={selected}
             onSelect={selectThread}
             onImport={openImport}
+            onSettings={() => setSettingsOpen(true)}
             importing={importState?.phase === "running" ? importState : null}
           />
           {thread ? (
@@ -112,13 +115,14 @@ export default function App() {
               target={jump?.threadId === thread.id ? jump.sortKey : undefined}
               jumpNonce={jump?.threadId === thread.id ? jump.nonce : undefined}
               onPeople={() => setPeopleOpen(true)}
-              onSearch={() => setSearch({ scope: "chat" })}
+              onSearch={() => setSearchOpen(true)}
               onLatest={() => setJump(null)}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
           )}
-          {search && <SearchPanel threads={threads} current={thread} initialScope={search.scope} onOpen={openHit} onClose={() => setSearch(null)} />}
+          {searchOpen && <SearchPanel threads={threads} onOpen={openHit} onClose={() => setSearchOpen(false)} />}
+          {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
         </>
       )}
       {importState && importVisible && <ImportDialog state={importState} onChange={setImportState} onClose={closeImport} />}
