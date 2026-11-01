@@ -5,6 +5,7 @@
 
 pub mod db;
 pub mod error;
+pub mod import;
 pub mod library;
 pub mod media;
 pub mod parse;
