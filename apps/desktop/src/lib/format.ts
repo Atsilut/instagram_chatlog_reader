@@ -63,13 +63,35 @@ function sameYear(a: Date, b: Date) {
   return a.getUTCFullYear() === b.getUTCFullYear();
 }
 
+/** Chat timeline date, such as "16 Jan 2025". The search date picker stays numeric. */
+function timelineDate(date: Date, language: AppLanguage, style: TimeStyle, withYear: boolean): string {
+  const month = new Intl.DateTimeFormat(LOCALE[language], { month: "short", timeZone: "UTC" }).format(date);
+  const day = date.getUTCDate();
+  const year = date.getUTCFullYear();
+  if (language === "ko") {
+    if (style === "us") return withYear ? `${month} ${day}일, ${year}년` : `${month} ${day}일`;
+    if (style === "kr") return withYear ? `${year}년 ${month} ${day}일` : `${month} ${day}일`;
+    return withYear ? `${day}일 ${month} ${year}년` : `${day}일 ${month}`;
+  }
+  if (language === "ja") {
+    const named = month.endsWith("月") ? month : `${month}月`;
+    if (style === "us") return withYear ? `${named}${day}日、${year}年` : `${named}${day}日`;
+    if (style === "kr") return withYear ? `${year}年${named}${day}日` : `${named}${day}日`;
+    return withYear ? `${day}日${named}${year}年` : `${day}日${named}`;
+  }
+  if (style === "us") return withYear ? `${month} ${day}, ${year}` : `${month} ${day}`;
+  if (style === "kr") return withYear ? `${year} ${month} ${day}` : `${month} ${day}`;
+  return withYear ? `${day} ${month} ${year}` : `${day} ${month}`;
+}
+
 function rendered(tsMinute: number, withDate: boolean, withYear: boolean, withWeekday: boolean): string {
   const { language, timeStyle } = getDisplaySettings();
-  const parts = dateParts(minuteDate(tsMinute), language, timeStyle);
-  const time = clock(parts);
+  const date = minuteDate(tsMinute);
+  const time = clock(dateParts(date, language, timeStyle));
   if (!withDate) return time;
-  const date = dateText(parts, timeStyle, language, withYear);
-  const dated = withWeekday && parts.weekday ? `${parts.weekday}, ${date}` : date;
+  const text = timelineDate(date, language, timeStyle, withYear);
+  const weekday = dateParts(date, language, timeStyle).weekday;
+  const dated = withWeekday && weekday ? `${weekday}, ${text}` : text;
   return `${dated}, ${time}`;
 }
 
@@ -85,9 +107,10 @@ export const formatFullStamp = (tsMinute: number) => rendered(tsMinute, true, tr
 /** Day separator: weekday and the full date, without the time. */
 export function formatDay(tsMinute: number): string {
   const { language, timeStyle } = getDisplaySettings();
-  const parts = dateParts(minuteDate(tsMinute), language, timeStyle);
-  const date = dateText(parts, timeStyle, language, true);
-  return parts.weekday ? `${parts.weekday}, ${date}` : date;
+  const date = minuteDate(tsMinute);
+  const text = timelineDate(date, language, timeStyle, true);
+  const weekday = dateParts(date, language, timeStyle).weekday;
+  return weekday ? `${weekday}, ${text}` : text;
 }
 
 /** Chat list date: the time for today, month and day for this year, the full date otherwise. */
@@ -95,7 +118,7 @@ export function formatListDate(tsMinute: number): string {
   const now = nowMinute();
   if (dayNumber(tsMinute) === dayNumber(now)) return rendered(tsMinute, false, false, false);
   const { language, timeStyle } = getDisplaySettings();
-  return dateText(dateParts(minuteDate(tsMinute), language, timeStyle), timeStyle, language, !sameYear(minuteDate(tsMinute), minuteDate(now)));
+  return timelineDate(minuteDate(tsMinute), language, timeStyle, !sameYear(minuteDate(tsMinute), minuteDate(now)));
 }
 
 /** A chosen calendar day, written with the current language and time style. `iso` is `YYYY-MM-DD`. */
@@ -107,24 +130,13 @@ export function formatCalendarDate(iso: string): string {
   return dateText(parts, timeStyle, language, true);
 }
 
-/** Empty date-field hint in the same order the time style uses. */
+/** Empty date-field hint in the same numeric order the time style uses. */
 export function calendarPlaceholder(language: AppLanguage, timeStyle: TimeStyle): string {
-  if (timeStyle === "kr") {
-    if (language === "ko") return "YYYY년 M월 D일";
-    if (language === "ja") return "YYYY年M月D日";
-    if (language === "es") return "AAAA. mes D";
-    return "YYYY. Mon D";
-  }
-  if (timeStyle === "us") {
-    if (language === "ko") return "M월 D, YYYY";
-    if (language === "ja") return "M月 D, YYYY";
-    if (language === "es") return "mes d, aaaa";
-    return "Mon D, YYYY";
-  }
-  if (language === "ko") return "D M월 YYYY";
-  if (language === "ja") return "D M月 YYYY";
-  if (language === "es") return "d mes aaaa";
-  return "D Mon YYYY";
+  if (timeStyle === "kr" && language === "ko") return "YYYY년 M월 D일";
+  if (timeStyle === "kr" && language === "ja") return "YYYY年M月D日";
+  if (timeStyle === "kr") return "YYYY. MM. DD.";
+  if (timeStyle === "us") return "MM/DD/YYYY";
+  return "DD/MM/YYYY";
 }
 
 /** Sunday is 0. The US week starts on Sunday; the others start on Monday. */
@@ -137,23 +149,15 @@ export function weekdayLabels(language: AppLanguage, timeStyle: TimeStyle): stri
   return [...sundayFirst.slice(start), ...sundayFirst.slice(0, start)];
 }
 
-/** Month heading for the date field. Korea puts the year first. */
-export function calendarMonthTitle(year: number, monthIndex: number, language: AppLanguage, timeStyle: TimeStyle): string {
-  const date = new Date(Date.UTC(year, monthIndex, 1));
-  const month = new Intl.DateTimeFormat(LOCALE[language], { month: "long", timeZone: "UTC" }).format(date);
-  const yearText = new Intl.DateTimeFormat(LOCALE[language], { year: "numeric", timeZone: "UTC" }).format(date);
-  if (timeStyle === "kr") {
-    if (language === "ja") return `${yearText}${month}`;
-    if (language === "ko") return `${yearText} ${month}`;
-    return `${yearText}. ${month}`;
-  }
-  return `${month} ${yearText}`;
+/** Month heading for the date field, in the language's own year-and-month form. */
+export function calendarMonthTitle(year: number, monthIndex: number, language: AppLanguage, _timeStyle: TimeStyle): string {
+  return new Intl.DateTimeFormat(LOCALE[language], { year: "numeric", month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(year, monthIndex, 1)));
 }
 
 /** A fixed afternoon, so the settings screen can show what a style looks like. */
 export function formatSample(language: AppLanguage, timeStyle: TimeStyle): string {
-  const parts = dateParts(new Date(Date.UTC(2025, 6, 18, 14, 15)), language, timeStyle);
-  return `${dateText(parts, timeStyle, language, true)}, ${clock(parts)}`;
+  const date = new Date(Date.UTC(2025, 6, 18, 14, 15));
+  return `${timelineDate(date, language, timeStyle, true)}, ${clock(dateParts(date, language, timeStyle))}`;
 }
 
 export function personName(p: ParticipantInfo | undefined): string {
