@@ -8,7 +8,10 @@ use crate::{Error, Result};
 
 /// Ordered schema migrations. Index + 1 is the schema version stored in `PRAGMA user_version`.
 /// Never edit a released migration; append a new one.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_init.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_init.sql"),
+    include_str!("../migrations/0002_merge.sql"),
+];
 
 pub const SCHEMA_VERSION: i64 = MIGRATIONS.len() as i64;
 
@@ -39,9 +42,32 @@ fn migrate(conn: &mut Connection) -> Result<()> {
             supported: SCHEMA_VERSION,
         });
     }
+    if current == SCHEMA_VERSION {
+        return Ok(());
+    }
+    // Table rebuilds (create new, copy, drop old, rename) need foreign keys off;
+    // the pragma has no effect inside a transaction. Integrity is checked before
+    // each commit instead.
+    conn.pragma_update(None, "foreign_keys", false)?;
+    let result = run_migrations(conn, current);
+    conn.pragma_update(None, "foreign_keys", true)?;
+    result
+}
+
+fn run_migrations(conn: &mut Connection, current: i64) -> Result<()> {
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let tx = conn.transaction()?;
         tx.execute_batch(sql)?;
+        let violations: i64 =
+            tx.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })?;
+        if violations > 0 {
+            return Err(Error::Migration {
+                version: i as i64 + 1,
+                message: format!("{violations} foreign key violations"),
+            });
+        }
         tx.pragma_update(None, "user_version", i as i64 + 1)?;
         tx.commit()?;
     }
@@ -94,6 +120,45 @@ mod tests {
             .unwrap();
         assert_eq!(mode, "wal");
         assert_eq!(fk, 1);
+    }
+
+    #[test]
+    fn upgrades_v1_library_with_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+            conn.execute_batch(MIGRATIONS[0]).unwrap();
+            conn.pragma_update(None, "user_version", 1).unwrap();
+            conn.execute_batch(
+                "INSERT INTO threads (id, ig_thread_id, slug, title) VALUES (1, '1', 'joy_1', 'Joy');
+                 INSERT INTO participants (id, thread_id, display_name, alias) VALUES (7, 1, 'Joy', 'Joyful');
+                 INSERT INTO messages (thread_id, participant_id, ts_minute, sort_key, fp, occurrence, kind)
+                     VALUES (1, 7, 1, 10000, x'00', 0, 'text');",
+            )
+            .unwrap();
+        }
+
+        let conn = open(&path).unwrap();
+        let (key, alias): (String, String) = conn
+            .query_row(
+                "SELECT sender_key, alias FROM participants WHERE id = 7",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((key.as_str(), alias.as_str()), ("Joy", "Joyful"));
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+        let violations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
     }
 
     #[test]

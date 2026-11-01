@@ -23,6 +23,12 @@ pub enum Error {
 
     #[error("library database version {found} is newer than this app supports ({supported})")]
     SchemaTooNew { found: i64, supported: i64 },
+
+    #[error("library upgrade to version {version} failed: {message}")]
+    Migration { version: i64, message: String },
+
+    #[error("import cancelled")]
+    Cancelled,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

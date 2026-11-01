@@ -33,7 +33,7 @@ fn create_thread(lib: &Library) -> i64 {
     .unwrap();
     let thread = c.last_insert_rowid();
     c.execute(
-        "INSERT INTO participants (thread_id, display_name) VALUES (?1, 'Alice')",
+        "INSERT INTO participants (thread_id, sender_key, display_name) VALUES (?1, '@other', 'Alice')",
         [thread],
     )
     .unwrap();
