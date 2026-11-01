@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useApi, type DeepProgress, type HitView, type IndexProgress, type SearchFilters, type SearchOrder, type ThreadSummary } from "../api";
 import { formatStamp, personName, threadTitle } from "../lib/format";
 import { useDisplaySettings } from "../lib/settings";
+import { DateField } from "./DateField";
 
 const PAGE = 50;
 const DEBOUNCE_MS = 300;
@@ -281,9 +282,9 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
           </Select>
         </div>
         <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <input type="date" className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-900" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <DateField value={from} onChange={setFrom} />
           <span>to</span>
-          <input type="date" className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-900" value={to} onChange={(e) => setTo(e.target.value)} />
+          <DateField value={to} onChange={setTo} align="right" />
           {(from || to) && (
             <button className="text-indigo-600 hover:underline dark:text-indigo-400" onClick={() => (setFrom(""), setTo(""))}>
               Clear

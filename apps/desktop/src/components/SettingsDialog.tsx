@@ -17,7 +17,7 @@ export function SettingsDialog({ onClose }: Props) {
     <Modal title="Settings" onClose={onClose} wide>
       <section>
         <h3 className="mb-2 text-sm font-semibold">Language</h3>
-        <p className="mb-3 text-xs text-zinc-500">Month and weekday names. The rest of the app stays in English.</p>
+        <p className="mb-3 text-xs text-zinc-500">Weekday names, and morning and afternoon. The rest of the app stays in English.</p>
         <div className="grid grid-cols-2 gap-2">
           {LANGUAGES.map((item) => (
             <Choice key={item.id} selected={language === item.id} onClick={() => setDisplaySettings({ language: item.id })}>

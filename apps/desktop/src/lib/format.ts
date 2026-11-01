@@ -20,7 +20,7 @@ function dateParts(date: Date, language: AppLanguage, timeStyle: TimeStyle): Dat
   for (const part of new Intl.DateTimeFormat(LOCALE[language], {
     weekday: "long",
     year: "numeric",
-    month: "short",
+    month: "numeric",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
@@ -39,14 +39,18 @@ function clock(parts: DateParts): string {
 }
 
 function dateText(parts: DateParts, style: TimeStyle, language: AppLanguage, withYear: boolean): string {
-  const { month, day, year } = parts;
-  if (style === "kr") {
-    if (language === "ko") return withYear ? `${year}년 ${month} ${day}일` : `${month} ${day}일`;
-    if (language === "ja") return withYear ? `${year}年${month}${day}日` : `${month}${day}日`;
-    return withYear ? `${year}. ${month} ${day}` : `${month} ${day}`;
+  const month = parts.month.padStart(2, "0");
+  const day = parts.day.padStart(2, "0");
+  const { year } = parts;
+  if (style === "kr" && language === "ko") {
+    return withYear ? `${year}년 ${Number(month)}월 ${Number(day)}일` : `${Number(month)}월 ${Number(day)}일`;
   }
-  if (style === "us") return withYear ? `${month} ${day}, ${year}` : `${month} ${day}`;
-  return withYear ? `${day} ${month} ${year}` : `${day} ${month}`;
+  if (style === "kr" && language === "ja") {
+    return withYear ? `${year}年${Number(month)}月${Number(day)}日` : `${Number(month)}月${Number(day)}日`;
+  }
+  if (style === "kr") return withYear ? `${year}. ${month}. ${day}.` : `${month}. ${day}.`;
+  if (style === "us") return withYear ? `${month}/${day}/${year}` : `${month}/${day}`;
+  return withYear ? `${day}/${month}/${year}` : `${day}/${month}`;
 }
 
 /** The local wall clock now, in the same "minutes as if UTC" form as message times. */
@@ -92,6 +96,58 @@ export function formatListDate(tsMinute: number): string {
   if (dayNumber(tsMinute) === dayNumber(now)) return rendered(tsMinute, false, false, false);
   const { language, timeStyle } = getDisplaySettings();
   return dateText(dateParts(minuteDate(tsMinute), language, timeStyle), timeStyle, language, !sameYear(minuteDate(tsMinute), minuteDate(now)));
+}
+
+/** A chosen calendar day, written with the current language and time style. `iso` is `YYYY-MM-DD`. */
+export function formatCalendarDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const { language, timeStyle } = getDisplaySettings();
+  const parts = dateParts(new Date(Date.UTC(y, m - 1, d, 12)), language, timeStyle);
+  return dateText(parts, timeStyle, language, true);
+}
+
+/** Empty date-field hint in the same order the time style uses. */
+export function calendarPlaceholder(language: AppLanguage, timeStyle: TimeStyle): string {
+  if (timeStyle === "kr") {
+    if (language === "ko") return "YYYY년 M월 D일";
+    if (language === "ja") return "YYYY年M月D日";
+    if (language === "es") return "AAAA. mes D";
+    return "YYYY. Mon D";
+  }
+  if (timeStyle === "us") {
+    if (language === "ko") return "M월 D, YYYY";
+    if (language === "ja") return "M月 D, YYYY";
+    if (language === "es") return "mes d, aaaa";
+    return "Mon D, YYYY";
+  }
+  if (language === "ko") return "D M월 YYYY";
+  if (language === "ja") return "D M月 YYYY";
+  if (language === "es") return "d mes aaaa";
+  return "D Mon YYYY";
+}
+
+/** Sunday is 0. The US week starts on Sunday; the others start on Monday. */
+export const weekStartsOn = (timeStyle: TimeStyle) => (timeStyle === "us" ? 0 : 1);
+
+export function weekdayLabels(language: AppLanguage, timeStyle: TimeStyle): string[] {
+  const fmt = new Intl.DateTimeFormat(LOCALE[language], { weekday: "short", timeZone: "UTC" });
+  const sundayFirst = Array.from({ length: 7 }, (_, i) => fmt.format(new Date(Date.UTC(2023, 0, 1 + i))));
+  const start = weekStartsOn(timeStyle);
+  return [...sundayFirst.slice(start), ...sundayFirst.slice(0, start)];
+}
+
+/** Month heading for the date field. Korea puts the year first. */
+export function calendarMonthTitle(year: number, monthIndex: number, language: AppLanguage, timeStyle: TimeStyle): string {
+  const date = new Date(Date.UTC(year, monthIndex, 1));
+  const month = new Intl.DateTimeFormat(LOCALE[language], { month: "long", timeZone: "UTC" }).format(date);
+  const yearText = new Intl.DateTimeFormat(LOCALE[language], { year: "numeric", timeZone: "UTC" }).format(date);
+  if (timeStyle === "kr") {
+    if (language === "ja") return `${yearText}${month}`;
+    if (language === "ko") return `${yearText} ${month}`;
+    return `${yearText}. ${month}`;
+  }
+  return `${month} ${yearText}`;
 }
 
 /** A fixed afternoon, so the settings screen can show what a style looks like. */
