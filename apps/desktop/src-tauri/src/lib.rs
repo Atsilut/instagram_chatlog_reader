@@ -176,8 +176,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let root = app.path().app_data_dir()?.join("library");
+            // ICV_LIBRARY_DIR points development runs at a scratch library.
+            let root = match std::env::var_os("ICV_LIBRARY_DIR") {
+                Some(dir) => PathBuf::from(dir),
+                None => app.path().app_data_dir()?.join("library"),
+            };
             let library = Library::open(&root)?;
+            app.asset_protocol_scope()
+                .allow_directory(root.join(chat_core::library::MEDIA_DIR), true)?;
             app.manage(AppState {
                 root,
                 library: Mutex::new(library),
