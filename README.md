@@ -27,7 +27,7 @@ This app does **not** connect to Instagram or Meta. It reads only the files prod
 
 - **Import anything:** single or multiple ZIP files or folders, at any level: whole `meta-*` wrappers, `instagram-*` exports, single chat folders, or individual `message_N.html` files. Nested ZIPs are supported.
 - **Merge overlapping backups:** import manual and periodic (daily, weekly, monthly, annual) backups in any order. Messages are stored once, real repeats are preserved, and nothing is deleted even if it is missing from a newer backup.
-- **Fast, typo-tolerant search:** full-text and fuzzy search over millions of messages, including Korean and other CJK text, with an optional exhaustive "deep search". Jump from any result straight to that message in its conversation.
+- **Fast, typo-tolerant search:** full-text and fuzzy search over millions of messages, including Korean and other CJK text, with an optional exhaustive "deep search". Jump from any result straight to that message in its conversation. `Ctrl+F` searches the open chat, `Ctrl+Shift+F` all chats.
 - **Media:** photos, videos, voice messages, GIFs, and files are stored once (deduplicated by content) and shown inline.
 - **Rename people:** override any participant's display name.
 - **Fully local and private:** all data stays on your machine.
@@ -79,6 +79,9 @@ cargo run -p chat-core --release --bin icv-media -- --library path/to/scratch-li
 
 # import backups into a scratch library and print the merge report (run again with more backups)
 cargo run -p chat-core --release --bin icv-import -- --library path/to/scratch-library path/to/backup.zip
+
+# search index speed on synthetic data (indexing time, query latency, deep search)
+ICV_BENCH_MESSAGES=1000000 cargo test -p chat-core --release --test search bench -- --ignored --nocapture
 
 # parse every inbox message_*.html under a real export (absolute path)
 ICV_SAMPLE_DIR=/abs/path/to/examples cargo test -p chat-core --release --test parse -- --ignored --nocapture
