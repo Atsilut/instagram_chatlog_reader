@@ -234,7 +234,7 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
           <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
             <span className="block">
               <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The normal search also finds similar verb variations and simple typos.
-              <span className="mt-1 block">Example) searching "love" finds "loved", "have loved" and "kove".</span>
+              <span className="mt-1 block">Example) searching "love" finds "loved", "have loved" and "kove". Searching "loved" finds "loved", not "love".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 dark:border-zinc-300">
               <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> The normal search only finds the exact word.
@@ -252,7 +252,7 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
           <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
             <span className="block">
               <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The search also finds related words and heavier typos. It checks every message, so it is slower.
-              <span className="mt-1 block">Example) searching "love" finds "lovely", and "japanse" finds "japanese".</span>
+              <span className="mt-1 block">Example) searching "love" finds "lovely", "loved" finds "love", and "japanse" finds "japanese".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 dark:border-zinc-300">
               <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> Only the normal search runs.

@@ -158,6 +158,27 @@ fn word_forms_match_and_derivations_do_not() {
         vec!["we have loved it ever since", "she had loved it too"]
     );
     assert!(texts(&lib, &index, q("kove")).contains(&"I used to love it".to_string()));
+
+    let loved = texts(&lib, &index, q("loved"));
+    assert!(loved.contains(&"we have loved it ever since".to_string()));
+    assert!(loved.contains(&"she had loved it too".to_string()));
+    assert!(
+        !loved.contains(&"I love that polite cat".to_string()),
+        "an inflected query does not match the base word"
+    );
+    assert!(!loved.contains(&"I used to love it".to_string()));
+
+    let mut deep_loved = deep(&lib, "loved");
+    sort_hits(&mut deep_loved, SortOrder::Oldest);
+    let deep_texts = texts_of(
+        &lib,
+        &deep_loved.iter().map(|h| h.message_id).collect::<Vec<_>>(),
+    );
+    assert!(
+        deep_texts.contains(&"I love that polite cat".to_string()),
+        "deep search still reaches the base word"
+    );
+    assert!(deep_texts.contains(&"I used to love it".to_string()));
 }
 
 #[test]

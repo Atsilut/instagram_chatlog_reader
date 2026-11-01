@@ -4,10 +4,11 @@
 //!
 //! The Tantivy index lives on disk next to the database and is kept in sync from
 //! `index_queue`, which the import fills. Messages are indexed as normalized words
-//! (see [`normalize`]). The normal search matches each query word as itself, as one of
-//! its forms (loved, have loved, used to love; see [`inflect`]) or as a common typo of
-//! any of those (a neighbouring key or two swapped letters; see [`typos`]). Korean
-//! words also match with a particle attached ("인절미" finds "인절미를").
+//! (see [`normalize`]). The normal search matches each query word as itself, as a
+//! form of a base word ("love" finds loved, have loved, used to love; see [`inflect`])
+//! or as a common typo of any of those (a neighbouring key or two swapped letters;
+//! see [`typos`]). An inflected query stays on that form, so "loved" does not find
+//! "love". Korean words also match with a particle attached ("인절미" finds "인절미를").
 //!
 //! Related words, heavier typos and missing spaces are left to [`deep::deep_search`],
 //! which checks every message.

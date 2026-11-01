@@ -2,40 +2,57 @@
 
 //! English word forms for the normal search.
 //!
-//! "love" matches loved, loves, loving and therefore "have loved", "had loved" and
-//! "used to love". A common typo of any of those forms matches too, so "lovef" and
-//! "havr loved" find "have loved". Derivations such as "lovely" are not included.
+//! A base form matches its other forms, so "love" matches loved, loves and loving
+//! and therefore "have loved", "had loved" and "used to love". An inflected query
+//! stays on that form: "loved" matches loved, not love. A common typo of a base
+//! form matches too, so "lovef" and "havr loved" find "have loved". Derivations
+//! such as "lovely" are not included.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use super::typos::common_typos;
 
-/// Every token a normal-search word should match: its forms and one typo of each.
+/// Every token a normal-search word should match.
+///
+/// A base form expands to its other forms and one typo of each. An inflected form
+/// matches itself and its typos only, so searching "loved" does not find "love".
 pub fn query_terms(word: &str) -> Vec<String> {
-    let mut lemmas = HashSet::new();
-    lemmas.insert(lemma(word));
-    for typo in common_typos(word) {
-        if let Some(found) = recognized_lemma(&typo) {
-            lemmas.insert(found);
+    let mut terms = HashSet::new();
+    terms.insert(word.to_string());
+    let typos = common_typos(word);
+    terms.extend(typos.iter().cloned());
+
+    // Stemming an inflected query back to its base would make "loved" find "love".
+    // That direction belongs to deep search. Typos of a base form still expand.
+    if is_base_form(word) {
+        expand_forms(&mut terms, word);
+        for typo in &typos {
+            if let Some(found) = recognized_lemma(typo) {
+                expand_forms(&mut terms, &found);
+            }
         }
     }
 
-    let mut terms = HashSet::new();
-    for found in lemmas {
-        for form in surface_forms(&found) {
-            terms.extend(common_typos(&form));
-            terms.insert(form);
-        }
-    }
-    terms.insert(word.to_string());
     let mut out: Vec<String> = terms.into_iter().collect();
     out.sort();
     out
 }
 
-fn lemma(word: &str) -> String {
-    recognized_lemma(word).unwrap_or_else(|| word.to_string())
+/// The word is not an inflection of some other form. Irregular lemmas are listed
+/// in their own group, so "have" is a base and "had" is not.
+fn is_base_form(word: &str) -> bool {
+    match recognized_lemma(word) {
+        Some(lemma) => lemma == word,
+        None => true,
+    }
+}
+
+fn expand_forms(terms: &mut HashSet<String>, lemma: &str) {
+    for form in surface_forms(lemma) {
+        terms.extend(common_typos(&form));
+        terms.insert(form);
+    }
 }
 
 /// A lemma found by an inflection rule or the irregular table, not a plain word.
@@ -170,7 +187,9 @@ fn strip_regular(word: &str) -> Option<String> {
         return undo_suffix(rest, word, past);
     }
     if let Some(rest) = word.strip_suffix("es") {
-        return (add_s(rest) == word && rest.len() >= 2).then_some(rest.to_string());
+        if add_s(rest) == word && rest.len() >= 2 {
+            return Some(rest.to_string());
+        }
     }
     if let Some(rest) = word.strip_suffix('s') {
         if !word.ends_with("ss") && add_s(rest) == word && rest.len() >= 3 {
@@ -289,6 +308,11 @@ mod tests {
         assert!(has("lovef", "loved"));
         assert!(has("lovef", "love"));
         assert!(has("kove", "loved"));
+        // An inflected query stays on that form. The base word is a deep-search result.
+        assert!(has("loved", "loved"));
+        assert!(!has("loved", "love"));
+        assert!(!has("loved", "loving"));
+        assert!(!has("loves", "love"));
     }
 
     #[test]
@@ -303,10 +327,10 @@ mod tests {
 
     #[test]
     fn regular_families() {
-        assert!(has("try", "tried") && has("tried", "try") && has("trying", "try"));
-        assert!(has("stop", "stopped") && has("stopping", "stop"));
-        assert!(has("walk", "walked") && has("walking", "walk"));
-        assert!(has("agree", "agreed") && has("agreeing", "agree"));
-        assert!(has("box", "boxes"));
+        assert!(has("try", "tried") && !has("tried", "try") && !has("trying", "try"));
+        assert!(has("stop", "stopped") && !has("stopping", "stop"));
+        assert!(has("walk", "walked") && !has("walking", "walk"));
+        assert!(has("agree", "agreed") && !has("agreeing", "agree"));
+        assert!(has("box", "boxes") && !has("boxes", "box"));
     }
 }
