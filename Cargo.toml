@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["crates/chat-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Atsilut"]
+repository = "https://github.com/Atsilut/instagram_chatlog_reader"
