@@ -3,16 +3,18 @@
 //! Full-text search over every message.
 //!
 //! The Tantivy index lives on disk next to the database and is kept in sync from
-//! `index_queue`, which the import fills. Each message is indexed twice:
-//! - `words`: normalized words. Queries match exact words, words within 1-2 typos, and
-//!   words starting with the query word (Korean particles, plurals).
-//! - `grams`: character pairs of the text without spaces. A message matches when most
-//!   pairs of the query appear, which survives typos and missing or extra spaces.
+//! `index_queue`, which the import fills. Messages are indexed as normalized words
+//! (see [`normalize`]). The normal search is strict: every query word must appear as
+//! the same word or one of its common typos (a neighbouring key or two swapped
+//! letters, see [`typos`]). Korean words also match with a particle attached
+//! ("인절미" finds "인절미를").
 //!
-//! [`deep::deep_search`] is the exhaustive fallback that checks every message.
+//! Related words, heavier typos and missing spaces are left to [`deep::deep_search`],
+//! which checks every message.
 
 pub mod deep;
 pub mod normalize;
+pub mod typos;
 
 use std::ops::Bound;
 use std::path::Path;
@@ -27,21 +29,19 @@ use tantivy::query::{
 use tantivy::schema::{
     Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, FAST, INDEXED, STORED,
 };
-use tantivy::tokenizer::{NgramTokenizer, RemoveLongFilter, TextAnalyzer, WhitespaceTokenizer};
+use tantivy::tokenizer::{RemoveLongFilter, TextAnalyzer, WhitespaceTokenizer};
 use tantivy::{
     DocAddress, Index, IndexReader, IndexWriter, Order, ReloadPolicy, TantivyDocument, Term,
 };
 
 use crate::error::IoContext;
 use crate::{Error, Result};
-use normalize::{bigrams, compact, normalize};
+use normalize::{normalize, stretched_forms};
+use typos::{common_typos, is_hangul_jamo};
 
 const WORDS_TOKENIZER: &str = "icv_words";
-const GRAMS_TOKENIZER: &str = "icv_grams";
 const WRITER_MEMORY: usize = 64 * 1024 * 1024;
 const SYNC_BATCH: i64 = 20_000;
-/// Share of a query's character pairs a message must contain.
-const GRAM_MATCH_RATIO: f64 = 0.7;
 
 /// Restricts a search to one chat, one sender and/or a time range (wall-clock minutes).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,10 +76,11 @@ impl Filters {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SortOrder {
+    /// Closest matches first (deep search); the normal search treats it as oldest first.
+    BestMatch,
     #[default]
-    Relevance,
-    Newest,
     Oldest,
+    Newest,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,7 +101,7 @@ pub struct SearchQuery {
 pub struct SearchResults {
     /// All matches, not just this page.
     pub total: usize,
-    /// Message ids of this page, best first (or by date).
+    /// Message ids of this page in the requested order.
     pub message_ids: Vec<i64>,
 }
 
@@ -118,7 +119,6 @@ struct Fields {
     participant_id: Field,
     ts_minute: Field,
     words: Field,
-    grams: Field,
 }
 
 pub struct SearchIndex {
@@ -129,27 +129,25 @@ pub struct SearchIndex {
 
 fn schema() -> (Schema, Fields) {
     let mut b = Schema::builder();
-    let text = |tokenizer: &str| {
-        TextOptions::default().set_indexing_options(
-            TextFieldIndexing::default()
-                .set_tokenizer(tokenizer)
-                .set_index_option(IndexRecordOption::WithFreqs),
-        )
-    };
+    let words = TextOptions::default().set_indexing_options(
+        TextFieldIndexing::default()
+            .set_tokenizer(WORDS_TOKENIZER)
+            .set_index_option(IndexRecordOption::WithFreqs),
+    );
     let f = Fields {
         message_id: b.add_i64_field("message_id", INDEXED | FAST | STORED),
         thread_id: b.add_i64_field("thread_id", INDEXED | FAST),
         participant_id: b.add_i64_field("participant_id", INDEXED | FAST),
         ts_minute: b.add_i64_field("ts_minute", INDEXED | FAST),
-        words: b.add_text_field("words", text(WORDS_TOKENIZER)),
-        grams: b.add_text_field("grams", text(GRAMS_TOKENIZER)),
+        words: b.add_text_field("words", words),
     };
     (b.build(), f)
 }
 
 impl SearchIndex {
-    /// Opens the index in `dir`, creating it if needed. A new (or unreadable, and
-    /// therefore recreated) index is filled by queueing every message for [`Self::sync`].
+    /// Opens the index in `dir`, creating it if needed. A new index (or one built by an
+    /// older version, which is recreated) is filled by queueing every message for
+    /// [`Self::sync`].
     pub fn open(dir: &Path, conn: &Connection) -> Result<Self> {
         std::fs::create_dir_all(dir).at(dir)?;
         let (schema, f) = schema();
@@ -170,10 +168,6 @@ impl SearchIndex {
             TextAnalyzer::builder(WhitespaceTokenizer::default())
                 .filter(RemoveLongFilter::limit(64))
                 .build(),
-        );
-        index.tokenizers().register(
-            GRAMS_TOKENIZER,
-            TextAnalyzer::builder(NgramTokenizer::new(2, 2, false)?).build(),
         );
         let reader = index
             .reader_builder()
@@ -226,14 +220,17 @@ impl SearchIndex {
             };
             for (id, thread, participant, ts, text) in &rows {
                 writer.delete_term(Term::from_field_i64(self.f.message_id, *id));
-                let norm = normalize(text);
                 let mut doc = TantivyDocument::default();
                 doc.add_i64(self.f.message_id, *id);
                 doc.add_i64(self.f.thread_id, *thread);
                 doc.add_i64(self.f.participant_id, *participant);
                 doc.add_i64(self.f.ts_minute, *ts);
-                doc.add_text(self.f.grams, compact(&norm));
-                doc.add_text(self.f.words, norm);
+                let mut words = normalize(text);
+                for extra in stretched_forms(text) {
+                    words.push(' ');
+                    words.push_str(&extra);
+                }
+                doc.add_text(self.f.words, words);
                 writer.add_document(doc)?;
             }
             writer.commit()?;
@@ -256,25 +253,18 @@ impl SearchIndex {
             return Ok(SearchResults::default());
         };
         let searcher = self.reader.searcher();
-        let top = TopDocs::with_limit(q.limit.max(1)).and_offset(q.offset);
-        let (addresses, total): (Vec<DocAddress>, usize) = match q.order {
-            SortOrder::Relevance => {
-                let (docs, total) = searcher.search(&query, &(top.order_by_score(), Count))?;
-                (docs.into_iter().map(|(_, a)| a).collect(), total)
-            }
-            SortOrder::Newest | SortOrder::Oldest => {
-                let order = if q.order == SortOrder::Newest {
-                    Order::Desc
-                } else {
-                    Order::Asc
-                };
-                let (docs, total) = searcher.search(
-                    &query,
-                    &(top.order_by_fast_field::<i64>("ts_minute", order), Count),
-                )?;
-                (docs.into_iter().map(|(_, a)| a).collect(), total)
-            }
+        let order = if q.order == SortOrder::Newest {
+            Order::Desc
+        } else {
+            Order::Asc
         };
+        let top = TopDocs::with_limit(q.limit.max(1)).and_offset(q.offset);
+        let (docs, total) = searcher.search(
+            &query,
+            &(top.order_by_fast_field::<i64>("ts_minute", order), Count),
+        )?;
+        let addresses: Vec<DocAddress> = docs.into_iter().map(|(_, a)| a).collect();
+
         let mut message_ids = Vec::with_capacity(addresses.len());
         for addr in addresses {
             let doc: TantivyDocument = searcher.doc(addr)?;
@@ -292,61 +282,10 @@ impl SearchIndex {
             return None;
         }
 
-        let word_clauses: Vec<(Occur, Box<dyn Query>)> = words
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = words
             .iter()
-            .map(|w| {
-                let term = Term::from_field_text(self.f.words, w);
-                let len = w.chars().count();
-                let distance = match len {
-                    0..=3 => 0,
-                    4..=7 => 1,
-                    _ => 2,
-                };
-                let exact: Box<dyn Query> = Box::new(BoostQuery::new(
-                    Box::new(TermQuery::new(term.clone(), IndexRecordOption::WithFreqs)),
-                    3.0,
-                ));
-                let fuzzy: Box<dyn Query> =
-                    Box::new(FuzzyTermQuery::new_prefix(term, distance, true));
-                let word: Box<dyn Query> = Box::new(BooleanQuery::new(vec![
-                    (Occur::Should, exact),
-                    (Occur::Should, fuzzy),
-                ]));
-                (Occur::Must, word)
-            })
+            .map(|w| (Occur::Must, self.word_query(w)))
             .collect();
-        let mut text_clauses: Vec<(Occur, Box<dyn Query>)> = vec![(
-            Occur::Should,
-            Box::new(BoostQuery::new(
-                Box::new(BooleanQuery::new(word_clauses)),
-                2.0,
-            )),
-        )];
-
-        let grams = bigrams(&compact(&norm));
-        if grams.len() >= 2 {
-            let required = ((grams.len() as f64) * GRAM_MATCH_RATIO).ceil() as usize;
-            let gram_clauses: Vec<(Occur, Box<dyn Query>)> = grams
-                .iter()
-                .map(|g| {
-                    let q: Box<dyn Query> = Box::new(TermQuery::new(
-                        Term::from_field_text(self.f.grams, g),
-                        IndexRecordOption::WithFreqs,
-                    ));
-                    (Occur::Should, q)
-                })
-                .collect();
-            text_clauses.push((
-                Occur::Should,
-                Box::new(BooleanQuery::with_minimum_required_clauses(
-                    gram_clauses,
-                    required.max(1),
-                )),
-            ));
-        }
-
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> =
-            vec![(Occur::Must, Box::new(BooleanQuery::new(text_clauses)))];
         for (field, value) in [
             (self.f.thread_id, filters.thread_id),
             (self.f.participant_id, filters.participant_id),
@@ -375,6 +314,23 @@ impl SearchIndex {
             ));
         }
         Some(Box::new(BooleanQuery::new(clauses)))
+    }
+
+    /// The word itself or one of its common typos. Korean words may carry a particle.
+    fn word_query(&self, word: &str) -> Box<dyn Query> {
+        let hangul = word.chars().any(is_hangul_jamo);
+        let one = |w: &str| -> Box<dyn Query> {
+            let term = Term::from_field_text(self.f.words, w);
+            if hangul {
+                Box::new(FuzzyTermQuery::new_prefix(term, 0, false))
+            } else {
+                Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs))
+            }
+        };
+        let mut alternatives: Vec<(Occur, Box<dyn Query>)> =
+            vec![(Occur::Should, Box::new(BoostQuery::new(one(word), 2.0)))];
+        alternatives.extend(common_typos(word).iter().map(|t| (Occur::Should, one(t))));
+        Box::new(BooleanQuery::new(alternatives))
     }
 }
 

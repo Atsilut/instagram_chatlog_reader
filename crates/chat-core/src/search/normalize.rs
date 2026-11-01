@@ -14,31 +14,26 @@ use unicode_normalization::UnicodeNormalization;
 
 pub fn normalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut last: Option<char> = None;
-    let mut run = 0;
-    for c in text
-        .nfkd()
-        .filter(|c| !is_combining_mark(*c))
-        .flat_map(char::to_lowercase)
-    {
-        let c = if c.is_alphanumeric() { c } else { ' ' };
-        if c == ' ' && (last == Some(' ') || last.is_none()) {
-            continue;
+    for word in fold(text) {
+        if !out.is_empty() {
+            out.push(' ');
         }
-        if Some(c) == last {
-            run += 1;
-            if run >= 2 && c != ' ' {
-                continue;
-            }
-        } else {
-            run = 0;
-        }
-        out.push(c);
-        last = Some(c);
+        out.extend(shrink_runs(&word, 3, 2));
     }
-    if out.ends_with(' ') {
-        out.pop();
-    }
+    out
+}
+
+/// Extra index forms for stretched words: runs of 3+ identical characters shrunk to
+/// one, so "soooo" is also found as "so" (its normalized form is "soo"). Ordinary
+/// double letters are kept: "good" gets no extra form.
+pub fn stretched_forms(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = fold(text)
+        .into_iter()
+        .filter(|w| shrink_runs(w, 3, 2).len() != w.len())
+        .map(|w| shrink_runs(&w, 3, 1).into_iter().collect())
+        .collect();
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -48,12 +43,41 @@ pub fn compact(normalized: &str) -> String {
     normalized.chars().filter(|c| *c != ' ').collect()
 }
 
-/// Distinct character bigrams of compact text.
-pub fn bigrams(compact: &str) -> Vec<String> {
-    let chars: Vec<char> = compact.chars().collect();
-    let mut out: Vec<String> = chars.windows(2).map(|w| w.iter().collect()).collect();
-    out.sort();
-    out.dedup();
+/// Words after NFKD, mark removal and lowercasing, before run shrinking.
+fn fold(text: &str) -> Vec<Vec<char>> {
+    let mut words = Vec::new();
+    let mut current = Vec::new();
+    for c in text
+        .nfkd()
+        .filter(|c| !is_combining_mark(*c))
+        .flat_map(char::to_lowercase)
+    {
+        if c.is_alphanumeric() {
+            current.push(c);
+        } else if !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Shrinks every run of at least `min_run` identical characters to `keep` characters.
+fn shrink_runs(word: &[char], min_run: usize, keep: usize) -> Vec<char> {
+    let mut out = Vec::with_capacity(word.len());
+    let mut i = 0;
+    while i < word.len() {
+        let mut j = i;
+        while j < word.len() && word[j] == word[i] {
+            j += 1;
+        }
+        let run = j - i;
+        let n = if run >= min_run { keep } else { run };
+        out.extend(std::iter::repeat_n(word[i], n));
+        i = j;
+    }
     out
 }
 
@@ -69,6 +93,12 @@ mod tests {
     }
 
     #[test]
+    fn stretched_words_get_a_squeezed_form() {
+        assert_eq!(stretched_forms("soooo good, yesss"), vec!["so", "yes"]);
+        assert!(stretched_forms("good book").is_empty());
+    }
+
+    #[test]
     fn hangul_becomes_jamo_and_keeps_prefixes() {
         let word = normalize("인절미");
         let with_particle = normalize("인절미를");
@@ -77,9 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_and_bigrams() {
+    fn compact_removes_spaces() {
         assert_eq!(compact("can not"), "cannot");
-        assert_eq!(bigrams("abab"), vec!["ab", "ba"]);
-        assert!(bigrams("a").is_empty());
     }
 }

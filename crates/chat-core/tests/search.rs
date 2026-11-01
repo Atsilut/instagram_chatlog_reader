@@ -5,7 +5,7 @@ mod common;
 use std::path::Path;
 
 use chat_core::query;
-use chat_core::search::deep::deep_search;
+use chat_core::search::deep::{deep_search, sort_hits, DeepHit};
 use chat_core::search::{Filters, SearchIndex, SearchQuery, SortOrder};
 use chat_core::Library;
 use common::{library, m, run, write_chat, M, ME};
@@ -17,6 +17,8 @@ fn chat() -> Vec<M> {
         m("Joy", "Jul 02, 2025 8:00 pm", "인절미를 먹었어"),
         m(ME, "Jul 03, 2025 7:00 pm", "Café later? soooo tired"),
         m("Joy", "Jul 04, 2025 6:00 pm", "the weather is wierd"),
+        m(ME, "Jul 05, 2025 6:00 pm", "I love that polite cat"),
+        m("Joy", "Jul 06, 2025 6:00 pm", "what a lovely day"),
     ]
 }
 
@@ -27,7 +29,7 @@ fn setup(tmp: &Path) -> (Library, SearchIndex) {
         "2025-08-01",
         "amy_222",
         "Amy",
-        &[m("Amy", "Jul 05, 2025 9:00 am", "japanese class tomorrow")],
+        &[m("Amy", "Jul 07, 2025 9:00 am", "japanese class tomorrow")],
         100,
         &[],
     );
@@ -38,13 +40,16 @@ fn setup(tmp: &Path) -> (Library, SearchIndex) {
     (lib, index)
 }
 
-fn texts(lib: &Library, index: &SearchIndex, q: SearchQuery) -> Vec<String> {
-    let r = index.search(&q).unwrap();
-    query::messages_by_ids(lib.conn(), &r.message_ids)
+fn texts_of(lib: &Library, ids: &[i64]) -> Vec<String> {
+    query::messages_by_ids(lib.conn(), ids)
         .unwrap()
         .into_iter()
         .map(|h| h.message.text.unwrap_or_default())
         .collect()
+}
+
+fn texts(lib: &Library, index: &SearchIndex, q: SearchQuery) -> Vec<String> {
+    texts_of(lib, &index.search(&q).unwrap().message_ids)
 }
 
 fn q(text: &str) -> SearchQuery {
@@ -55,47 +60,79 @@ fn q(text: &str) -> SearchQuery {
     }
 }
 
-#[test]
-fn finds_exact_words_and_both_chats() {
-    let tmp = tempfile::tempdir().unwrap();
-    let (lib, index) = setup(tmp.path());
-    let found = texts(&lib, &index, q("japanese"));
-    assert_eq!(found.len(), 2);
-    assert!(found.contains(&"I'm studying japanese today".to_string()));
+fn deep(lib: &Library, text: &str) -> Vec<DeepHit> {
+    let mut hits = Vec::new();
+    deep_search(
+        lib.conn(),
+        text,
+        &Filters::default(),
+        None,
+        None,
+        &mut |h| hits.extend(h),
+        &mut |_| {},
+    )
+    .unwrap();
+    hits
 }
 
 #[test]
-fn tolerates_typos_in_the_query_and_in_the_chat() {
+fn finds_the_same_word_in_every_chat_oldest_first() {
     let tmp = tempfile::tempdir().unwrap();
     let (lib, index) = setup(tmp.path());
-    assert!(texts(&lib, &index, q("japanse")).contains(&"I'm studying japanese today".to_string()));
     assert_eq!(
-        texts(&lib, &index, q("weird weather")),
-        vec!["the weather is wierd"]
+        texts(&lib, &index, q("Japanese")),
+        vec!["I'm studying japanese today", "japanese class tomorrow"]
     );
     assert_eq!(
         texts(&lib, &index, q("so tired cafe")),
-        vec!["Café later? soooo tired"]
+        vec!["Café later? soooo tired"],
+        "case, accents and stretched letters"
     );
 }
 
 #[test]
-fn handles_missing_spaces_and_korean() {
+fn accepts_common_typos_only() {
     let tmp = tempfile::tempdir().unwrap();
     let (lib, index) = setup(tmp.path());
     assert_eq!(
-        texts(&lib, &index, q("goodmorning")),
-        vec!["good morning sunshine"]
+        texts(&lib, &index, q("kove")),
+        vec!["I love that polite cat"],
+        "neighbouring key"
     );
     assert_eq!(
-        texts(&lib, &index, q("인절미")),
-        vec!["인절미를 먹었어"],
-        "word prefix covers particles"
+        texts(&lib, &index, q("politw")),
+        vec!["I love that polite cat"]
     );
+    assert_eq!(
+        texts(&lib, &index, q("weird weather")),
+        vec!["the weather is wierd"],
+        "swapped letters"
+    );
+
+    assert_eq!(
+        texts(&lib, &index, q("love")),
+        vec!["I love that polite cat"],
+        "not lovely"
+    );
+    assert!(
+        texts(&lib, &index, q("japanse")).is_empty(),
+        "missing letter is for deep search"
+    );
+    assert!(
+        texts(&lib, &index, q("goodmorning")).is_empty(),
+        "missing space is for deep search"
+    );
+}
+
+#[test]
+fn korean_particles_and_keyboard_typos() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    assert_eq!(texts(&lib, &index, q("인절미")), vec!["인절미를 먹었어"]);
     assert_eq!(
         texts(&lib, &index, q("인잘미")),
         vec!["인절미를 먹었어"],
-        "one-jamo typo"
+        "ㅓ and ㅏ are neighbouring keys"
     );
 }
 
@@ -185,30 +222,40 @@ fn later_imports_are_indexed_incrementally() {
 }
 
 #[test]
-fn deep_search_finds_heavily_misspelled_text() {
+fn deep_search_finds_related_words_heavy_typos_and_split_words() {
     let tmp = tempfile::tempdir().unwrap();
     let (lib, _index) = setup(tmp.path());
-    let query_text = "studyng japnes";
 
-    let mut ids = Vec::new();
-    let mut last = None;
-    let n = deep_search(
-        lib.conn(),
-        query_text,
-        &Filters::default(),
-        None,
-        None,
-        &mut |hits| ids.extend(hits),
-        &mut |p| last = Some((p.scanned, p.total)),
-    )
-    .unwrap();
-    assert_eq!(n, 1);
-    let hits = query::messages_by_ids(lib.conn(), &ids).unwrap();
+    let mut love = deep(&lib, "love");
+    sort_hits(&mut love, SortOrder::Oldest);
+    let ids: Vec<i64> = love.iter().map(|h| h.message_id).collect();
     assert_eq!(
-        hits[0].message.text.as_deref(),
-        Some("I'm studying japanese today")
+        texts_of(&lib, &ids),
+        vec!["I love that polite cat", "what a lovely day"]
     );
-    assert_eq!(last, Some((6, 6)));
+
+    let japanese = deep(&lib, "studyng japnes");
+    assert_eq!(
+        texts_of(&lib, &[japanese[0].message_id]),
+        vec!["I'm studying japanese today"]
+    );
+    let morning = deep(&lib, "goodmorning");
+    assert_eq!(
+        texts_of(&lib, &[morning[0].message_id]),
+        vec!["good morning sunshine"]
+    );
+}
+
+#[test]
+fn deep_best_match_ranks_closest_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, _index) = setup(tmp.path());
+    let mut hits = deep(&lib, "japanes");
+    sort_hits(&mut hits, SortOrder::BestMatch);
+    assert!(hits.windows(2).all(|w| w[0].distance <= w[1].distance));
+    let mut newest = hits.clone();
+    sort_hits(&mut newest, SortOrder::Newest);
+    assert!(newest.windows(2).all(|w| w[0].ts_minute >= w[1].ts_minute));
 }
 
 /// Indexing and query speed on synthetic data:
@@ -289,11 +336,10 @@ fn bench_large_library() {
 
     for text in [
         "japanese",
-        "japanse",
+        "japansee",
         "airport dinner",
         "인절미",
-        "goodmorning",
-        "weird coffee tomorow",
+        "weird coffee tomorrow",
     ] {
         let start = std::time::Instant::now();
         let r = index.search(&q(text)).unwrap();
@@ -304,16 +350,7 @@ fn bench_large_library() {
         );
     }
     let start = std::time::Instant::now();
-    let found = deep_search(
-        lib.conn(),
-        "japnese studdy",
-        &Filters::default(),
-        None,
-        None,
-        &mut |_| {},
-        &mut |_| {},
-    )
-    .unwrap();
+    let found = deep(&lib, "japnese studdy").len();
     eprintln!("deep search: {found} matches in {:.1?}", start.elapsed());
 }
 
