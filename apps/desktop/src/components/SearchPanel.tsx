@@ -235,12 +235,17 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           <span>Include similar words</span>
           <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
             <span className="block">
-              <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The normal search also finds similar verb variations and simple typos. Searching "love" finds "loved", "have loved" and "kove".
+              <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The normal search also finds similar verb variations and simple typos.
+              <span className="mt-1 block">Example) searching "love" finds "loved", "have loved" and "kove".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 dark:border-zinc-300">
-              <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> The normal search only finds the exact word. Searching "love" finds "love", not "loved" or "kove".
+              <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> The normal search only finds the exact word.
+              <span className="mt-1 block">Example) searching "love" finds "love", not "loved" or "kove".</span>
             </span>
-            <span className="mt-2 block text-[11px] text-zinc-400 dark:text-zinc-500">Capitals and accents still match, so "Café" finds "cafe". "lovely" always needs deep search.</span>
+            <span className="mt-2 block border-t border-white/15 pt-2 text-[11px] text-zinc-400 dark:border-zinc-300 dark:text-zinc-500">
+              Capitals and accents still match. "lovely" always needs deep search.
+              <span className="mt-1 block">Example) "Café" finds "cafe".</span>
+            </span>
           </span>
         </label>
         <label className="flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1 text-sm">
