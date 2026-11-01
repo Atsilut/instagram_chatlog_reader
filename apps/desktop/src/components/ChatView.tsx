@@ -41,12 +41,17 @@ function buildRows(msgs: MessageView[]): Row[] {
 
 interface Props {
   thread: ThreadSummary;
-  /** Open centred on this message instead of at the newest one. */
+  /** Open centred on this message (sort key) instead of at the newest one. */
   target?: number;
+  /** Changes on every jump, so jumping to the same message again re-centres it. */
+  jumpNonce?: number;
   onPeople: () => void;
+  onSearch: () => void;
+  /** Leaves a jumped-to position and shows the newest messages. */
+  onLatest: () => void;
 }
 
-export function ChatView({ thread, target, onPeople }: Props) {
+export function ChatView({ thread, target, jumpNonce, onPeople, onSearch, onLatest }: Props) {
   const api = useApi();
   const [msgs, setMsgs] = useState<MessageView[]>([]);
   const [firstIndex, setFirstIndex] = useState(START_INDEX);
@@ -84,7 +89,7 @@ export function ChatView({ thread, target, onPeople }: Props) {
     return () => {
       alive = false;
     };
-  }, [api, thread.id, target]);
+  }, [api, thread.id, target, jumpNonce]);
 
   const rows = useMemo(() => buildRows(msgs), [msgs]);
 
@@ -137,6 +142,18 @@ export function ChatView({ thread, target, onPeople }: Props) {
             )}
           </p>
         </div>
+        {target !== undefined && (
+          <button
+            className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            onClick={onLatest}
+            title="Show the newest messages"
+          >
+            Latest
+          </button>
+        )}
+        <button className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" onClick={onSearch} title="Search messages (Ctrl+F)">
+          Search
+        </button>
         <button className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" onClick={onPeople}>
           People
         </button>
@@ -145,7 +162,7 @@ export function ChatView({ thread, target, onPeople }: Props) {
       {error && <p className="p-6 text-sm text-red-500">{error}</p>}
       {initialIndex !== null && (
         <Virtuoso
-          key={`${thread.id}:${target ?? "latest"}`}
+          key={`${thread.id}:${target ?? "latest"}:${jumpNonce ?? 0}`}
           className="flex-1"
           data={rows}
           firstItemIndex={firstIndex}

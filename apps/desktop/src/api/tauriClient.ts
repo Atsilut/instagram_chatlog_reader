@@ -7,12 +7,20 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import type { ApiClient, Unlisten } from "./client";
 import type {
+  DeepDone,
+  DeepProgress,
+  HitView,
   ImportFinished,
   ImportProgress,
+  IndexProgress,
+  IndexStatus,
   LibraryInfo,
   MessageView,
   MessageWindow,
   ParticipantInfo,
+  SearchFilters,
+  SearchQuery,
+  SearchResponse,
   ThreadSummary,
 } from "./types";
 
@@ -66,6 +74,46 @@ export class TauriClient implements ApiClient {
     return getCurrentWebview().onDragDropEvent((e) => {
       if (e.payload.type === "drop" && e.payload.paths.length > 0) cb(e.payload.paths);
     });
+  }
+
+  search(query: SearchQuery): Promise<SearchResponse> {
+    return invoke("search", { query });
+  }
+
+  indexStatus(): Promise<IndexStatus> {
+    return invoke("index_status");
+  }
+
+  onIndexProgress(cb: (p: IndexProgress) => void): Promise<Unlisten> {
+    return listen<IndexProgress>("index://progress", (e) => cb(e.payload));
+  }
+
+  onIndexDone(cb: () => void): Promise<Unlisten> {
+    return listen("index://done", () => cb());
+  }
+
+  startDeepSearch(text: string, filters: SearchFilters): Promise<void> {
+    return invoke("start_deep_search", { text, filters });
+  }
+
+  cancelDeepSearch(): Promise<void> {
+    return invoke("cancel_deep_search");
+  }
+
+  onDeepHits(cb: (ids: number[]) => void): Promise<Unlisten> {
+    return listen<number[]>("deep://hits", (e) => cb(e.payload));
+  }
+
+  onDeepProgress(cb: (p: DeepProgress) => void): Promise<Unlisten> {
+    return listen<DeepProgress>("deep://progress", (e) => cb(e.payload));
+  }
+
+  onDeepDone(cb: (d: DeepDone) => void): Promise<Unlisten> {
+    return listen<DeepDone>("deep://done", (e) => cb(e.payload));
+  }
+
+  loadHits(ids: number[]): Promise<HitView[]> {
+    return invoke("load_hits", { ids });
   }
 
   mediaUrl(storePath: string): string {

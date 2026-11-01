@@ -1,12 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import type {
+  DeepDone,
+  DeepProgress,
+  HitView,
   ImportFinished,
   ImportProgress,
+  IndexProgress,
+  IndexStatus,
   LibraryInfo,
   MessageView,
   MessageWindow,
   ParticipantInfo,
+  SearchFilters,
+  SearchQuery,
+  SearchResponse,
   ThreadSummary,
 } from "./types";
 
@@ -22,6 +30,7 @@ export interface ApiClient {
   loadMessages(threadId: number, window: MessageWindow, limit: number): Promise<MessageView[]>;
   /** Returns the thread's participants after the change. */
   setAlias(participantId: number, alias: string | null): Promise<ParticipantInfo[]>;
+
   /** Lets the user choose ZIP files or one folder; resolves to [] when cancelled. */
   pickImportSources(kind: "zip" | "folder"): Promise<string[]>;
   startImport(paths: string[]): Promise<void>;
@@ -30,6 +39,18 @@ export interface ApiClient {
   onImportFinished(cb: (f: ImportFinished) => void): Promise<Unlisten>;
   /** Files or folders dropped onto the window. */
   onDropPaths(cb: (paths: string[]) => void): Promise<Unlisten>;
+
+  search(query: SearchQuery): Promise<SearchResponse>;
+  indexStatus(): Promise<IndexStatus>;
+  onIndexProgress(cb: (p: IndexProgress) => void): Promise<Unlisten>;
+  onIndexDone(cb: () => void): Promise<Unlisten>;
+  /** Scans every message; matching ids arrive through `onDeepHits`. */
+  startDeepSearch(text: string, filters: SearchFilters): Promise<void>;
+  cancelDeepSearch(): Promise<void>;
+  onDeepHits(cb: (ids: number[]) => void): Promise<Unlisten>;
+  onDeepProgress(cb: (p: DeepProgress) => void): Promise<Unlisten>;
+  onDeepDone(cb: (d: DeepDone) => void): Promise<Unlisten>;
+  loadHits(ids: number[]): Promise<HitView[]>;
 
   /** URL for a stored media file (`storePath` is relative to the library root). */
   mediaUrl(storePath: string): string;

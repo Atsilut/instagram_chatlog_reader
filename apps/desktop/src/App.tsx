@@ -6,6 +6,7 @@ import { ChatView } from "./components/ChatView";
 import { ImportDialog, type ImportState } from "./components/ImportDialog";
 import { Button } from "./components/Modal";
 import { PeopleDialog } from "./components/PeopleDialog";
+import { SearchPanel } from "./components/SearchPanel";
 import { Sidebar } from "./components/Sidebar";
 
 /** How often the chat list refreshes while an import is running. */
@@ -18,8 +19,30 @@ export default function App() {
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [importVisible, setImportVisible] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
+  const [search, setSearch] = useState<{ scope: "chat" | "all" } | null>(null);
+  const [jump, setJump] = useState<{ threadId: number; sortKey: number; nonce: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const lastRefresh = useRef(0);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setSearch({ scope: e.shiftKey ? "all" : "chat" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const selectThread = (id: number) => {
+    setSelected(id);
+    setJump(null);
+  };
+  const openHit = (threadId: number, sortKey: number) => {
+    setSelected(threadId);
+    setJump((j) => ({ threadId, sortKey, nonce: (j?.nonce ?? 0) + 1 }));
+  };
 
   const refresh = useCallback(async () => {
     lastRefresh.current = Date.now();
@@ -78,15 +101,24 @@ export default function App() {
           <Sidebar
             threads={threads}
             selected={selected}
-            onSelect={setSelected}
+            onSelect={selectThread}
             onImport={openImport}
             importing={importState?.phase === "running" ? importState : null}
           />
           {thread ? (
-            <ChatView key={thread.id} thread={thread} onPeople={() => setPeopleOpen(true)} />
+            <ChatView
+              key={thread.id}
+              thread={thread}
+              target={jump?.threadId === thread.id ? jump.sortKey : undefined}
+              jumpNonce={jump?.threadId === thread.id ? jump.nonce : undefined}
+              onPeople={() => setPeopleOpen(true)}
+              onSearch={() => setSearch({ scope: "chat" })}
+              onLatest={() => setJump(null)}
+            />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
           )}
+          {search && <SearchPanel threads={threads} current={thread} initialScope={search.scope} onOpen={openHit} onClose={() => setSearch(null)} />}
         </>
       )}
       {importState && importVisible && <ImportDialog state={importState} onChange={setImportState} onClose={closeImport} />}

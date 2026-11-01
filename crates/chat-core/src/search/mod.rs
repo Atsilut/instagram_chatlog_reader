@@ -237,6 +237,7 @@ impl SearchIndex {
                 writer.add_document(doc)?;
             }
             writer.commit()?;
+            self.reader.reload()?;
             conn.execute(
                 "DELETE FROM index_queue WHERE message_id > ?1 AND message_id <= ?2",
                 params![last, batch_last],

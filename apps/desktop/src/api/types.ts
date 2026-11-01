@@ -76,6 +76,55 @@ export type MessageWindow =
   | { kind: "after"; sortKey: number }
   | { kind: "around"; sortKey: number };
 
+export interface SearchFilters {
+  threadId?: number | null;
+  participantId?: number | null;
+  fromMinute?: number | null;
+  toMinute?: number | null;
+}
+
+export type SearchOrder = "relevance" | "newest" | "oldest";
+
+export interface SearchQuery {
+  text: string;
+  filters: SearchFilters;
+  order: SearchOrder;
+  offset: number;
+  limit: number;
+}
+
+export interface HitView {
+  threadId: number;
+  message: MessageView;
+}
+
+export interface SearchResponse {
+  total: number;
+  hits: HitView[];
+}
+
+export interface IndexStatus {
+  pending: number;
+  indexing: boolean;
+}
+
+export interface IndexProgress {
+  done: number;
+  total: number;
+}
+
+export interface DeepProgress {
+  scanned: number;
+  total: number;
+  matches: number;
+}
+
+export interface DeepDone {
+  matches: number;
+  cancelled: boolean;
+  error: string | null;
+}
+
 export interface ImportProgress {
   pages_done: number;
   pages_total: number;
