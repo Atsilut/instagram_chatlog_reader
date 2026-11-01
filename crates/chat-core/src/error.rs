@@ -14,6 +14,13 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    #[error("ZIP error in {path}: {source}")]
+    Zip {
+        path: PathBuf,
+        #[source]
+        source: zip::result::ZipError,
+    },
+
     #[error("library database version {found} is newer than this app supports ({supported})")]
     SchemaTooNew { found: i64, supported: i64 },
 }
