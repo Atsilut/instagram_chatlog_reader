@@ -111,10 +111,7 @@ pub fn import(lib: &mut Library, inputs: &[PathBuf], opts: &ImportOptions) -> Re
         run.report.exports += 1;
     }
 
-    conn.execute(
-        "UPDATE participants SET is_owner = (sender_key = ?1)",
-        [SELF_KEY],
-    )?;
+    mark_group_owners(conn)?;
     let mut report = run.report;
     report.threads = run.threads_seen.len();
     report.media_files_stored =
@@ -302,6 +299,7 @@ impl Run<'_> {
             params![export_id, self.scan.vfs.file(page.file).path, size as i64, &hash[..], now()],
         )?;
         let source_file = tx.last_insert_rowid();
+        let new_before = self.report.messages_new;
         // Even when every day is skipped, a newer backup refreshes display names.
         for inc in &incoming {
             participant(&tx, ctx, &inc.sender_key, &inc.msg.sender)?;
@@ -325,6 +323,18 @@ impl Run<'_> {
                 export_at,
             )?;
         }
+        // Keep the chat list current page by page, so a cancelled or interrupted
+        // import still shows correct counts.
+        tx.prepare_cached(
+            "UPDATE threads SET
+                 message_count = message_count + ?1,
+                 last_sort_key = (SELECT MAX(sort_key) FROM messages WHERE thread_id = ?2)
+             WHERE id = ?2",
+        )?
+        .execute(params![
+            (self.report.messages_new - new_before) as i64,
+            ctx.id
+        ])?;
         tx.commit()?;
 
         self.report.pages_parsed += 1;
@@ -864,8 +874,8 @@ fn participant(tx: &Connection, ctx: &mut ThreadCtx, key: &str, display_name: &s
         }
         None => {
             tx.execute(
-                "INSERT INTO participants (thread_id, sender_key, display_name) VALUES (?1, ?2, ?3)",
-                params![ctx.id, key, display_name],
+                "INSERT INTO participants (thread_id, sender_key, display_name, is_owner) VALUES (?1, ?2, ?3, ?4)",
+                params![ctx.id, key, display_name, key == SELF_KEY],
             )?;
             tx.last_insert_rowid()
         }
@@ -917,6 +927,19 @@ fn stored_day_digest(tx: &Connection, thread: i64, lo: i64, hi: i64) -> Result<H
     Ok(digest(rows.iter().map(|(id, fp)| {
         (fp, reactions.remove(id).unwrap_or_default())
     })))
+}
+
+/// Group chats key senders by display name, so "you" is found by the display names
+/// you have in one-to-one chats.
+fn mark_group_owners(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE participants SET is_owner = 1
+         WHERE is_owner = 0
+           AND thread_id IN (SELECT id FROM threads WHERE kind = 'group')
+           AND display_name IN (SELECT display_name FROM participants WHERE sender_key = ?1)",
+        [SELF_KEY],
+    )?;
+    Ok(())
 }
 
 fn finish_thread(conn: &Connection, ctx: &ThreadCtx, export_at: Option<i64>) -> Result<()> {

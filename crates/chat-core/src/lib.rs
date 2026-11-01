@@ -9,6 +9,7 @@ pub mod import;
 pub mod library;
 pub mod media;
 pub mod parse;
+pub mod query;
 pub mod scan;
 
 pub use error::{Error, Result};
