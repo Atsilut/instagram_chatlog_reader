@@ -131,7 +131,6 @@ export default function App() {
               threads={threads}
               current={thread}
               allChats={searchAll || !thread}
-              onAllChats={setSearchAll}
               onOpen={openHit}
               onClose={() => setSearchOpen(false)}
             />

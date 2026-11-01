@@ -18,7 +18,6 @@ interface Props {
   current: ThreadSummary | null;
   /** Search every chat. Ctrl+Shift+F sets this; Ctrl+F clears it. */
   allChats: boolean;
-  onAllChats: (all: boolean) => void;
   /** Opens a chat centred on a message. */
   onOpen: (threadId: number, sortKey: number) => void;
   onClose: () => void;
@@ -38,7 +37,7 @@ function dateToMinute(date: string, endOfDay: boolean): number | null {
   return Date.UTC(y, m - 1, d) / 60_000 + (endOfDay ? 1439 : 0);
 }
 
-export function SearchPanel({ threads, current, allChats, onAllChats, onOpen, onClose }: Props) {
+export function SearchPanel({ threads, current, allChats, onOpen, onClose }: Props) {
   const api = useApi();
   useDisplaySettings();
   const [text, setText] = useState("");
@@ -271,14 +270,6 @@ export function SearchPanel({ threads, current, allChats, onAllChats, onOpen, on
             </span>
           </span>
         </label>
-        <div className="flex flex-wrap gap-1.5">
-          <PersonChoice selected={!allChats} onClick={() => current && onAllChats(false)}>
-            This chat
-          </PersonChoice>
-          <PersonChoice selected={allChats} onClick={() => onAllChats(true)}>
-            All chats
-          </PersonChoice>
-        </div>
         {current && !allChats && current.participants.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             <PersonChoice selected={participant === null} onClick={() => setParticipant(null)}>
