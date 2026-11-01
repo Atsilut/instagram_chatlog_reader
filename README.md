@@ -73,6 +73,9 @@ cargo run -p chat-core --release --bin icv-scan -- path/to/backup.zip path/to/fo
 # store all chat media from the inputs into a scratch library and report dedup/types
 cargo run -p chat-core --release --bin icv-media -- --library path/to/scratch-library path/to/backup.zip
 
+# import backups into a scratch library and print the merge report (run again with more backups)
+cargo run -p chat-core --release --bin icv-import -- --library path/to/scratch-library path/to/backup.zip
+
 # parse every inbox message_*.html under a real export (absolute path)
 ICV_SAMPLE_DIR=/abs/path/to/examples cargo test -p chat-core --release --test parse -- --ignored --nocapture
 ```
