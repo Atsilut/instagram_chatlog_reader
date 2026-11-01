@@ -27,8 +27,11 @@ pub enum Error {
     #[error("library upgrade to version {version} failed: {message}")]
     Migration { version: i64, message: String },
 
-    #[error("import cancelled")]
+    #[error("cancelled")]
     Cancelled,
+
+    #[error("search index error: {0}")]
+    Search(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -310,6 +310,36 @@ fn attach_details(conn: &Connection, thread: i64, msgs: &mut [MessageView]) -> R
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HitView {
+    pub thread_id: i64,
+    pub message: MessageView,
+}
+
+/// Full messages for search hits, in the given order. Ids that no longer exist are skipped.
+pub fn messages_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<HitView>> {
+    let mut out = Vec::with_capacity(ids.len());
+    for &id in ids {
+        let row = conn
+            .prepare_cached("SELECT m.thread_id, m.sort_key FROM messages m WHERE m.id = ?1")?
+            .query_row([id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))
+            .optional()?;
+        let Some((thread, sort_key)) = row else {
+            continue;
+        };
+        let mut msgs = select_messages(conn, thread, "m.sort_key = ?2", "ASC", 1, Some(sort_key))?;
+        attach_details(conn, thread, &mut msgs)?;
+        if let Some(message) = msgs.pop() {
+            out.push(HitView {
+                thread_id: thread,
+                message,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Sort key of the first message at or after a wall-clock minute (jump to date).
 pub fn sort_key_at(conn: &Connection, thread: i64, ts_minute: i64) -> Result<Option<i64>> {
     Ok(conn
