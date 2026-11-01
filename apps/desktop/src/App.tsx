@@ -24,6 +24,8 @@ export default function App() {
   const [searchAll, setSearchAll] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [jump, setJump] = useState<{ threadId: number; sortKey: number; nonce: number } | null>(null);
+  /** Bumped when an import finishes so the open chat reloads its messages. */
+  const [transcriptEpoch, setTranscriptEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const lastRefresh = useRef(0);
 
@@ -73,6 +75,8 @@ export default function App() {
       api.onImportFinished((result) => {
         setImportState({ phase: "done", result });
         setImportVisible(true);
+        setJump(null);
+        setTranscriptEpoch((n) => n + 1);
         refresh();
       }),
       api.onDropPaths((paths) => {
@@ -112,7 +116,7 @@ export default function App() {
           />
           {thread ? (
             <ChatView
-              key={thread.id}
+              key={`${thread.id}:${transcriptEpoch}`}
               thread={thread}
               target={jump?.threadId === thread.id ? jump.sortKey : undefined}
               jumpNonce={jump?.threadId === thread.id ? jump.nonce : undefined}
