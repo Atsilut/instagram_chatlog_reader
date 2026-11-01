@@ -28,6 +28,7 @@ fn header() {
         ("inbox", "alice_1234567890123456", "1234567890123456")
     );
     assert_eq!(p.page, Some(2));
+    assert_eq!(p.page_count, Some(2));
 }
 
 #[test]

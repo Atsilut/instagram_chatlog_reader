@@ -23,6 +23,8 @@ pub struct ParsedPage {
     pub thread: Option<ThreadRef>,
     /// N of this `message_N.html`, from the selected pagination link.
     pub page: Option<u32>,
+    /// Highest page number in the pagination links (the chat's page count).
+    pub page_count: Option<u32>,
     /// In document order, which is newest first.
     pub messages: Vec<ParsedMessage>,
     pub issues: Vec<ParseIssue>,
@@ -124,7 +126,7 @@ pub fn parse_page(html: &str) -> ParsedPage {
         .map(element_text)
         .unwrap_or_default();
     let (owner_username, generated_at) = parse_generated_by(&doc);
-    let (thread, page) = parse_pagination(&doc);
+    let (thread, page, page_count) = parse_pagination(&doc);
 
     let mut messages = Vec::new();
     let mut issues = Vec::new();
@@ -141,6 +143,7 @@ pub fn parse_page(html: &str) -> ParsedPage {
         generated_at,
         thread,
         page,
+        page_count,
         messages,
         issues,
     }
@@ -186,9 +189,10 @@ fn parse_iso_minute(s: &str) -> Option<DateTime<Utc>> {
         })
 }
 
-fn parse_pagination(doc: &Html) -> (Option<ThreadRef>, Option<u32>) {
+fn parse_pagination(doc: &Html) -> (Option<ThreadRef>, Option<u32>, Option<u32>) {
     let mut thread = None;
     let mut page = None;
+    let mut page_count: Option<u32> = None;
     for a in doc.select(&sel("main a[href]")) {
         let Some((t, n)) = a.value().attr("href").and_then(page_link) else {
             continue;
@@ -196,9 +200,10 @@ fn parse_pagination(doc: &Html) -> (Option<ThreadRef>, Option<u32>) {
         if a.value().classes().any(|c| c == "selected") {
             page = Some(n);
         }
+        page_count = Some(page_count.map_or(n, |c| c.max(n)));
         thread.get_or_insert(t);
     }
-    (thread, page)
+    (thread, page, page_count)
 }
 
 /// Parses `.../messages/{mailbox}/{folder}/message_{n}.html`.
