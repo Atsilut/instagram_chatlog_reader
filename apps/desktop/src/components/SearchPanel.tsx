@@ -253,8 +253,8 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           <span>Deep search</span>
           <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
             <span className="block">
-              <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The search also finds related words, heavier typos and words written without spaces. It checks every message, so it is slower.
-              <span className="mt-1 block">Example) searching "love" finds "lovely", and "goodmorning" finds "good morning".</span>
+              <span className="font-semibold text-emerald-300 dark:text-emerald-700">On.</span> The search also finds related words and heavier typos. It checks every message, so it is slower.
+              <span className="mt-1 block">Example) searching "love" finds "lovely", and "japanse" finds "japanese".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 dark:border-zinc-300">
               <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> Only the normal search runs.

@@ -38,10 +38,11 @@ use tantivy::{
 use crate::error::IoContext;
 use crate::{Error, Result};
 use inflect::query_terms;
-use normalize::{normalize, stretched_forms};
+use normalize::{normalize, space_joins, stretched_forms};
 use typos::{common_typos, is_hangul_jamo};
 
-const WORDS_TOKENIZER: &str = "icv_words";
+/// Renamed when indexed text changes, so an older index is rebuilt.
+const WORDS_TOKENIZER: &str = "icv_words_v2";
 const WRITER_MEMORY: usize = 64 * 1024 * 1024;
 const SYNC_BATCH: i64 = 20_000;
 
@@ -232,7 +233,7 @@ impl SearchIndex {
                 doc.add_i64(self.f.participant_id, *participant);
                 doc.add_i64(self.f.ts_minute, *ts);
                 let mut words = normalize(text);
-                for extra in stretched_forms(text) {
+                for extra in stretched_forms(text).into_iter().chain(space_joins(&words)) {
                     words.push(' ');
                     words.push_str(&extra);
                 }
@@ -293,10 +294,28 @@ impl SearchIndex {
             return None;
         }
 
-        let mut clauses: Vec<(Occur, Box<dyn Query>)> = words
-            .iter()
-            .map(|w| (Occur::Must, self.word_query(w, q_similar)))
-            .collect();
+        let words_query: Box<dyn Query> = Box::new(BooleanQuery::new(
+            words
+                .iter()
+                .map(|w| (Occur::Must, self.word_query(w, q_similar)))
+                .collect(),
+        ));
+        // "good morning" also matches the single word "goodmorning", and the other way around.
+        let text_query = if words.len() >= 2 {
+            let joined: String = words.concat();
+            let joined_query: Box<dyn Query> = Box::new(TermQuery::new(
+                Term::from_field_text(self.f.words, &joined),
+                IndexRecordOption::WithFreqs,
+            ));
+            let either: Box<dyn Query> = Box::new(BooleanQuery::new(vec![
+                (Occur::Should, words_query),
+                (Occur::Should, joined_query),
+            ]));
+            either
+        } else {
+            words_query
+        };
+        let mut clauses: Vec<(Occur, Box<dyn Query>)> = vec![(Occur::Must, text_query)];
         for (field, value) in [
             (self.f.thread_id, filters.thread_id),
             (self.f.participant_id, filters.participant_id),

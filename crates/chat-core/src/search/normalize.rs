@@ -37,6 +37,27 @@ pub fn stretched_forms(text: &str) -> Vec<String> {
     out
 }
 
+/// Joins of two to four neighboring words, so a missing or extra space still matches:
+/// "good morning" is also stored as "goodmorning".
+pub fn space_joins(normalized: &str) -> Vec<String> {
+    let words: Vec<&str> = normalized.split_whitespace().collect();
+    let mut out = Vec::new();
+    for window in 2..=4 {
+        if words.len() < window {
+            break;
+        }
+        for start in 0..=words.len() - window {
+            let joined: String = words[start..start + window].concat();
+            if joined.chars().count() <= 64 {
+                out.push(joined);
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Normalized text without spaces: substring search then ignores spacing differences
 /// ("can not" finds "cannot").
 pub fn compact(normalized: &str) -> String {
@@ -104,6 +125,15 @@ mod tests {
         let with_particle = normalize("인절미를");
         assert!(with_particle.starts_with(&word));
         assert!(word.chars().count() > 3, "decomposed into jamo");
+    }
+
+    #[test]
+    fn neighboring_words_are_joined() {
+        assert_eq!(
+            space_joins("good morning sunshine"),
+            vec!["goodmorning", "goodmorningsunshine", "morningsunshine"]
+        );
+        assert!(space_joins("hello").is_empty());
     }
 
     #[test]

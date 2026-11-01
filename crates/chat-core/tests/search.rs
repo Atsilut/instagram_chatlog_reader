@@ -22,6 +22,7 @@ fn chat() -> Vec<M> {
         m(ME, "Jul 06, 2025 7:00 pm", "we have loved it ever since"),
         m("Joy", "Jul 06, 2025 8:00 pm", "she had loved it too"),
         m(ME, "Jul 06, 2025 9:00 pm", "I used to love it"),
+        m("Joy", "Jul 08, 2025 9:00 am", "say goodmorning"),
     ]
 }
 
@@ -119,10 +120,6 @@ fn accepts_common_typos_only() {
         texts(&lib, &index, q("japanse")).is_empty(),
         "missing letter is for deep search"
     );
-    assert!(
-        texts(&lib, &index, q("goodmorning")).is_empty(),
-        "missing space is for deep search"
-    );
 }
 
 #[test]
@@ -161,6 +158,19 @@ fn word_forms_match_and_derivations_do_not() {
         vec!["we have loved it ever since", "she had loved it too"]
     );
     assert!(texts(&lib, &index, q("kove")).contains(&"I used to love it".to_string()));
+}
+
+#[test]
+fn missing_or_extra_spaces_always_match() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    let mut joined = q("goodmorning");
+    joined.similar_words = false;
+    assert!(texts(&lib, &index, joined).contains(&"good morning sunshine".to_string()));
+
+    let mut split = q("good morning");
+    split.similar_words = false;
+    assert!(texts(&lib, &index, split).contains(&"say goodmorning".to_string()));
 }
 
 #[test]
