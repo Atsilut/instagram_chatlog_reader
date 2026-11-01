@@ -67,6 +67,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 # inspect how one exported page is parsed (summary, or full JSON with --json)
 cargo run -p chat-core --release --bin icv-parse -- path/to/message_1.html
 
+# list the exports and chats found in any mix of folders and ZIPs (reads names only)
+cargo run -p chat-core --release --bin icv-scan -- path/to/backup.zip path/to/folder
+
 # parse every inbox message_*.html under a real export (absolute path)
 ICV_SAMPLE_DIR=/abs/path/to/examples cargo test -p chat-core --release --test parse -- --ignored --nocapture
 ```
