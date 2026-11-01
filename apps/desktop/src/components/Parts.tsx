@@ -50,18 +50,7 @@ export function Part({ part, onOpenImage }: { part: PartView; onOpenImage: (src:
     case "file": {
       if (!present) return <Missing label="File" />;
       const name = part.url?.split("/").pop() ?? "File";
-      return (
-        <button
-          className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          onClick={() => api.openMedia(media.storePath!)}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
-            <path d="M14 3v6h6" />
-          </svg>
-          <span className="truncate">{name}</span>
-        </button>
-      );
+      return <FileChip name={name} storePath={media.storePath!} />;
     }
     case "share":
       return <ShareCard part={part} />;
@@ -93,11 +82,37 @@ function ShareCard({ part }: { part: PartView }) {
       )}
       {part.url && (
         <button className="w-full px-3 py-2 text-left text-xs font-medium text-indigo-600 hover:underline dark:text-indigo-400" onClick={() => api.openUrl(part.url!)}>
-          Open on Instagram
+          {isInstagram(part.url) ? "Open on Instagram" : `Open ${hostOf(part.url)}`}
         </button>
       )}
     </div>
   );
+}
+
+function FileChip({ name, storePath }: { name: string; storePath: string }) {
+  const api = useApi();
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 text-left text-sm hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+      title="Show in folder"
+      onClick={() => {
+        setFailed(false);
+        api.revealMedia(storePath).catch(() => setFailed(true));
+      }}
+    >
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+        <path d="M14 3v6h6" />
+      </svg>
+      <span className="truncate">{failed ? "Couldn't show this file" : name}</span>
+    </button>
+  );
+}
+
+function isInstagram(url: string): boolean {
+  const host = hostOf(url);
+  return host === "instagram.com" || host.endsWith(".instagram.com");
 }
 
 function LinkCard({ url, title }: { url: string | null; title: string | null }) {

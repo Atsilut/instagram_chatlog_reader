@@ -4,7 +4,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { ApiClient, Unlisten } from "./client";
 import type {
   DeepDone,
@@ -118,6 +118,10 @@ export class TauriClient implements ApiClient {
 
   openMedia(storePath: string): Promise<void> {
     return openPath(this.absolute(storePath));
+  }
+
+  revealMedia(storePath: string): Promise<void> {
+    return revealItemInDir(this.absolute(storePath));
   }
 
   openUrl(url: string): Promise<void> {

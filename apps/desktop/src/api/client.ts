@@ -56,5 +56,7 @@ export interface ApiClient {
   /** URL for a stored media file (`storePath` is relative to the library root). */
   mediaUrl(storePath: string): string;
   openMedia(storePath: string): Promise<void>;
+  /** Shows a stored file in the system file manager instead of opening it. */
+  revealMedia(storePath: string): Promise<void>;
   openUrl(url: string): Promise<void>;
 }
