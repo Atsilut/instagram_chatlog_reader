@@ -34,7 +34,10 @@ pub use merge::{merge_minute, MinuteMerge, Slot};
 const MINUTES_PER_DAY: i64 = 1440;
 /// `sort_key = ts_minute * SEQ_PER_MINUTE + position within the minute`.
 pub const SEQ_PER_MINUTE: i64 = 10_000;
-const MAX_TZ_SHIFT_MIN: i64 = 14 * 60;
+/// Furthest apart two civil clocks can be (UTC+14 and UTC−12).
+const MAX_TZ_SHIFT_MIN: i64 = 26 * 60;
+/// Real timezone offsets are multiples of 15 minutes. Anything else is not applied.
+const TZ_STEP_MIN: i64 = 15;
 const TZ_SAMPLES: usize = 400;
 const TZ_MIN_EVIDENCE: usize = 5;
 
@@ -166,6 +169,9 @@ struct ThreadCtx {
     names_newer: bool,
     /// Minutes added to this backup's times (timezone correction).
     shift: i64,
+    /// The backup lines up at an offset that is not a timezone. Its messages are
+    /// left out so they are not stored a second time.
+    skip: bool,
     participants: HashMap<String, i64>,
     pages_seen: HashSet<u32>,
     page_count: Option<u32>,
@@ -297,6 +303,11 @@ impl Run<'_> {
             threads.insert(key.clone(), ctx);
         }
         let ctx = threads.get_mut(&key).expect("inserted above");
+        if ctx.skip {
+            self.threads_seen.insert(ctx.id);
+            self.report.pages_parsed += 1;
+            return self.progressed(&parsed.title);
+        }
         ctx.pages_seen.insert(page.number);
         if let Some(c) = parsed.page_count {
             ctx.page_count = Some(ctx.page_count.map_or(c, |p| p.max(c)));
@@ -629,6 +640,7 @@ impl Run<'_> {
             direct,
             names_newer,
             shift: 0,
+            skip: false,
             participants: HashMap::new(),
             pages_seen: HashSet::new(),
             page_count: None,
@@ -639,14 +651,18 @@ impl Run<'_> {
             |r| r.get(0),
         )?;
         if has_messages {
-            ctx.shift = self.detect_shift(conn, src, &ctx, parsed, page, export_id)?;
+            match self.detect_shift(conn, src, &ctx, parsed, page, export_id)? {
+                TzFix::None => {}
+                TzFix::Apply(delta) => ctx.shift = delta,
+                TzFix::Skip => ctx.skip = true,
+            }
         }
         Ok(ctx)
     }
 
-    /// Compares this backup's messages with the library by content alone. If they
-    /// consistently match at a whole-hour offset instead of at the same minute, the
-    /// backup was made in a different timezone and its times are shifted.
+    /// Compares this backup's messages with the library by content alone. A consistent
+    /// offset that is a real timezone (multiples of 15 minutes, at most 26 hours) is
+    /// applied. Any other consistent offset is refused so the messages are not stored twice.
     fn detect_shift(
         &mut self,
         conn: &Connection,
@@ -655,7 +671,7 @@ impl Run<'_> {
         parsed: &ParsedPage,
         page: Page,
         export_id: i64,
-    ) -> Result<i64> {
+    ) -> Result<TzFix> {
         let newest = match src.pages.first() {
             Some(p) if p.number != page.number => {
                 let bytes = self.scan.vfs.read(p.file)?;
@@ -687,9 +703,7 @@ impl Run<'_> {
                 if let [stored] = found[..] {
                     matches += 1;
                     let delta = stored - minutes(m.timestamp);
-                    if delta % 60 == 0 && delta.abs() <= MAX_TZ_SHIFT_MIN {
-                        *hist.entry(delta).or_default() += 1;
-                    }
+                    *hist.entry(delta).or_default() += 1;
                 }
             }
         }
@@ -700,13 +714,13 @@ impl Run<'_> {
             .filter(|(d, _)| **d != 0)
             .max_by_key(|(_, n)| **n)
         else {
-            return Ok(0);
+            return Ok(TzFix::None);
         };
         if n <= same {
-            return Ok(0);
+            return Ok(TzFix::None);
         }
         let label = self.scan.exports[src.export].key.clone();
-        if n >= TZ_MIN_EVIDENCE && n * 10 >= matches * 6 {
+        if n >= TZ_MIN_EVIDENCE && n * 10 >= matches * 6 && is_timezone_offset(delta) {
             conn.execute(
                 "UPDATE exports SET tz_offset_min = ?1 WHERE id = ?2",
                 params![delta, export_id],
@@ -717,14 +731,21 @@ impl Run<'_> {
                 minutes: delta,
                 evidence: n,
             });
-            Ok(delta)
+            Ok(TzFix::Apply(delta))
+        } else if n >= TZ_MIN_EVIDENCE && n * 10 >= matches * 6 {
+            self.report.warnings.push(format!(
+                "\"{}\" in {label}: {n} of {matches} sampled messages match the library {delta} minutes apart; \
+                 that offset is not a timezone, so this backup was not merged into the chat",
+                parsed.title
+            ));
+            Ok(TzFix::Skip)
         } else {
             self.report.warnings.push(format!(
                 "\"{}\" in {label}: {n} of {matches} sampled messages match the library {delta} minutes apart; \
                  not enough evidence to correct the timezone",
                 parsed.title
             ));
-            Ok(0)
+            Ok(TzFix::None)
         }
     }
 
@@ -948,6 +969,16 @@ fn stored_part(
         "remote_gif" => Part::RemoteGif { url: path },
         _ => Part::Photo { path },
     }
+}
+
+enum TzFix {
+    None,
+    Apply(i64),
+    Skip,
+}
+
+fn is_timezone_offset(delta: i64) -> bool {
+    delta.rem_euclid(TZ_STEP_MIN) == 0 && delta.abs() <= MAX_TZ_SHIFT_MIN
 }
 
 fn minutes(t: chrono::NaiveDateTime) -> i64 {

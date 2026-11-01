@@ -332,6 +332,92 @@ fn timezone_shifted_backup_is_detected_and_aligned() {
     assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 12);
 }
 
+/// `Jul 01, 2025` at a 24-hour clock time, formatted the way the export writes it.
+fn clock(hour: u32, min: u32) -> String {
+    let (h, ap) = match hour {
+        0 => (12, "am"),
+        1..=11 => (hour, "am"),
+        12 => (12, "pm"),
+        _ => (hour - 12, "pm"),
+    };
+    format!("Jul 01, 2025 {h}:{min:02} {ap}")
+}
+
+/// Six messages, and the same six with every timestamp moved by `delta_min`.
+fn shifted_pair(delta_min: i32) -> (Vec<M>, Vec<M>) {
+    let base = [(1, 0), (1, 15), (1, 30), (1, 45), (2, 0), (2, 15)];
+    let at = |i: usize, hour: u32, min: u32| {
+        m(
+            if i.is_multiple_of(2) { "Joy" } else { ME },
+            &clock(hour, min),
+            &format!("message number {i} here"),
+        )
+    };
+    let chat = base
+        .iter()
+        .enumerate()
+        .map(|(i, &(h, m))| at(i, h, m))
+        .collect();
+    let shifted = base
+        .iter()
+        .enumerate()
+        .map(|(i, &(h, m))| {
+            let total = h as i32 * 60 + m as i32 + delta_min;
+            at(i, total.div_euclid(60) as u32, total.rem_euclid(60) as u32)
+        })
+        .collect();
+    (chat, shifted)
+}
+
+#[test]
+fn half_hour_timezone_shift_is_aligned() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (chat, shifted) = shifted_pair(5 * 60 + 30);
+    let a = write_export(tmp.path(), "2025-07-02", "Joy", &chat, 100, &[]);
+    let b = write_export(tmp.path(), "2025-07-03", "Joy", &shifted, 100, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[a]);
+    let r = run(&mut lib, &[b]);
+
+    assert_eq!(r.tz_shifts.len(), 1, "{:?}", r.warnings);
+    assert_eq!(r.tz_shifts[0].minutes, -(5 * 60 + 30));
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 6);
+}
+
+#[test]
+fn a_shift_past_fourteen_hours_is_aligned() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (chat, shifted) = shifted_pair(17 * 60);
+    let a = write_export(tmp.path(), "2025-07-02", "Joy", &chat, 100, &[]);
+    let b = write_export(tmp.path(), "2025-07-03", "Joy", &shifted, 100, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[a]);
+    let r = run(&mut lib, &[b]);
+
+    assert_eq!(r.tz_shifts.len(), 1, "{:?}", r.warnings);
+    assert_eq!(r.tz_shifts[0].minutes, -17 * 60);
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 6);
+}
+
+#[test]
+fn a_shift_that_is_not_a_timezone_is_not_imported_twice() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (chat, shifted) = shifted_pair(7);
+    let a = write_export(tmp.path(), "2025-07-02", "Joy", &chat, 100, &[]);
+    let b = write_export(tmp.path(), "2025-07-03", "Joy", &shifted, 100, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[a]);
+    let r = run(&mut lib, &[b]);
+
+    assert!(r.tz_shifts.is_empty(), "{:?}", r.tz_shifts);
+    assert!(
+        r.warnings.iter().any(|w| w.contains("7 minutes")),
+        "{:?}",
+        r.warnings
+    );
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 6);
+}
+
 #[test]
 fn messages_missing_from_the_latest_complete_backup_are_kept_and_flagged() {
     let tmp = tempfile::tempdir().unwrap();
