@@ -11,6 +11,7 @@ pub mod media;
 pub mod parse;
 pub mod query;
 pub mod scan;
+pub mod search;
 
 pub use error::{Error, Result};
 pub use library::Library;
