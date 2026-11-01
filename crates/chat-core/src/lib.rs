@@ -6,6 +6,7 @@
 pub mod db;
 pub mod error;
 pub mod library;
+pub mod parse;
 
 pub use error::{Error, Result};
 pub use library::Library;
