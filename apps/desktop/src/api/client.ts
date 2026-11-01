@@ -43,7 +43,8 @@ export interface ApiClient {
   search(query: SearchQuery): Promise<SearchResponse>;
   indexStatus(): Promise<IndexStatus>;
   onIndexProgress(cb: (p: IndexProgress) => void): Promise<Unlisten>;
-  onIndexDone(cb: () => void): Promise<Unlisten>;
+  /** `error` is set when indexing failed. */
+  onIndexDone(cb: (error: string | null) => void): Promise<Unlisten>;
   /** Scans every message in the background; read matches with `deepPage`. */
   startDeepSearch(text: string, filters: SearchFilters): Promise<void>;
   cancelDeepSearch(): Promise<void>;

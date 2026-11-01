@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +33,8 @@ struct AppState {
     import: Mutex<Option<Arc<AtomicBool>>>,
     /// Cancel flag of the running deep search, if any.
     deep: Mutex<Option<Arc<AtomicBool>>>,
+    /// Bumped under `deep_hits`'s lock so a cancelled scan cannot append after the next one clears it.
+    deep_gen: Arc<AtomicU64>,
     /// Matches of the latest deep search, kept so pages can be read in any order.
     deep_hits: Arc<Mutex<Vec<DeepHit>>>,
 }
@@ -233,7 +235,13 @@ fn start_deep_search(
     }
     let root = state.root.clone();
     let store = state.deep_hits.clone();
-    store.lock().map_err(err)?.clear();
+    let gens = state.deep_gen.clone();
+    let my_gen = {
+        let mut hits = store.lock().map_err(err)?;
+        let gen = gens.fetch_add(1, Ordering::AcqRel) + 1;
+        hits.clear();
+        gen
+    };
     std::thread::spawn(move || {
         let throttle = Throttle::new();
         let result = Library::open(&root).and_then(|lib| {
@@ -244,8 +252,11 @@ fn start_deep_search(
                 None,
                 Some(&cancel),
                 &mut |hits| {
-                    if !cancel.load(Ordering::Relaxed) {
-                        if let Ok(mut all) = store.lock() {
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    if let Ok(mut all) = store.lock() {
+                        if gens.load(Ordering::Acquire) == my_gen {
                             all.extend(hits);
                         }
                     }
@@ -412,6 +423,7 @@ pub fn run() {
                 indexing: Arc::new(AtomicBool::new(false)),
                 import: Mutex::new(None),
                 deep: Mutex::new(None),
+                deep_gen: Arc::new(AtomicU64::new(0)),
                 deep_hits: Arc::new(Mutex::new(Vec::new())),
             });
             spawn_indexing(app.handle());

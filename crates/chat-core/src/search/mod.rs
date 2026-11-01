@@ -98,8 +98,8 @@ pub struct SearchQuery {
     #[serde(default)]
     pub offset: usize,
     pub limit: usize,
-    /// Also match word forms and typos of them (loved, have loved, lovef).
-    /// When false, only the word itself and its own common typos match.
+    /// Also match English word forms and one-key typos (loved, have loved, lovef).
+    /// When false, only the word itself matches. Korean still matches a longer word that starts with it.
     #[serde(default)]
     pub similar_words: bool,
 }

@@ -21,6 +21,7 @@ export default function App() {
   const [importVisible, setImportVisible] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchAll, setSearchAll] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [jump, setJump] = useState<{ threadId: number; sortKey: number; nonce: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
         e.preventDefault();
+        setSearchAll(e.shiftKey);
         setSearchOpen(true);
       }
     };
@@ -115,13 +117,25 @@ export default function App() {
               target={jump?.threadId === thread.id ? jump.sortKey : undefined}
               jumpNonce={jump?.threadId === thread.id ? jump.nonce : undefined}
               onPeople={() => setPeopleOpen(true)}
-              onSearch={() => setSearchOpen(true)}
+              onSearch={() => {
+                setSearchAll(false);
+                setSearchOpen(true);
+              }}
               onLatest={() => setJump(null)}
             />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
           )}
-          {searchOpen && <SearchPanel threads={threads} current={thread} onOpen={openHit} onClose={() => setSearchOpen(false)} />}
+          {searchOpen && (
+            <SearchPanel
+              threads={threads}
+              current={thread}
+              allChats={searchAll || !thread}
+              onAllChats={setSearchAll}
+              onOpen={openHit}
+              onClose={() => setSearchOpen(false)}
+            />
+          )}
           {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
         </>
       )}

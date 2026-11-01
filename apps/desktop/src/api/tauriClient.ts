@@ -88,8 +88,8 @@ export class TauriClient implements ApiClient {
     return listen<IndexProgress>("index://progress", (e) => cb(e.payload));
   }
 
-  onIndexDone(cb: () => void): Promise<Unlisten> {
-    return listen("index://done", () => cb());
+  onIndexDone(cb: (error: string | null) => void): Promise<Unlisten> {
+    return listen<string | null>("index://done", (e) => cb(e.payload));
   }
 
   startDeepSearch(text: string, filters: SearchFilters): Promise<void> {

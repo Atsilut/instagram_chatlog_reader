@@ -16,6 +16,9 @@ const FEW_RESULTS = 5;
 interface Props {
   threads: ThreadSummary[];
   current: ThreadSummary | null;
+  /** Search every chat. Ctrl+Shift+F sets this; Ctrl+F clears it. */
+  allChats: boolean;
+  onAllChats: (all: boolean) => void;
   /** Opens a chat centred on a message. */
   onOpen: (threadId: number, sortKey: number) => void;
   onClose: () => void;
@@ -35,7 +38,7 @@ function dateToMinute(date: string, endOfDay: boolean): number | null {
   return Date.UTC(y, m - 1, d) / 60_000 + (endOfDay ? 1439 : 0);
 }
 
-export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
+export function SearchPanel({ threads, current, allChats, onAllChats, onOpen, onClose }: Props) {
   const api = useApi();
   useDisplaySettings();
   const [text, setText] = useState("");
@@ -63,12 +66,12 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
 
   const filters: SearchFilters = useMemo(
     () => ({
-      threadId: current?.id ?? null,
-      participantId: current ? participant : null,
+      threadId: allChats ? null : (current?.id ?? null),
+      participantId: allChats || !current ? null : participant,
       fromMinute: dateToMinute(from, false),
       toMinute: dateToMinute(to, true),
     }),
-    [current, participant, from, to],
+    [allChats, current, participant, from, to],
   );
 
   useEffect(() => input.current?.focus(), []);
@@ -153,9 +156,15 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
     return () => clearTimeout(t);
   }, [api, deepMode, query, filters]);
 
-  useEffect(() => {
+  // Re-page when the sort order changes. A new query must not read the previous
+  // scan: that buffer is cleared only when the debounced start runs.
+  const pageDeep = useRef<() => void>(() => {});
+  pageDeep.current = () => {
     if (deepMode && query) fetchDeep(loaded.current);
-  }, [deepMode, order, fetchDeep, query]);
+  };
+  useEffect(() => {
+    pageDeep.current();
+  }, [order]);
 
   // Index status and deep search events.
   useEffect(() => {
@@ -163,9 +172,10 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
     api.indexStatus().then((s) => setPendingIndex(s.indexing ? s.pending : 0));
     const subs = [
       api.onIndexProgress((p) => setIndexing(p)),
-      api.onIndexDone(() => {
+      api.onIndexDone((indexError) => {
         setIndexing(null);
-        setPendingIndex(0);
+        if (indexError) setError(indexError);
+        else setPendingIndex(0);
       }),
       api.onDeepProgress((progress) => {
         setDeep((d) => (d.running ? { ...d, progress } : d));
@@ -261,10 +271,18 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
             </span>
           </span>
         </label>
-        {current && current.participants.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          <PersonChoice selected={!allChats} onClick={() => current && onAllChats(false)}>
+            This chat
+          </PersonChoice>
+          <PersonChoice selected={allChats} onClick={() => onAllChats(true)}>
+            All chats
+          </PersonChoice>
+        </div>
+        {current && !allChats && current.participants.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             <PersonChoice selected={participant === null} onClick={() => setParticipant(null)}>
-              Both
+              Anyone
             </PersonChoice>
             {current.participants.map((p) => (
               <PersonChoice key={p.id} selected={participant === p.id} onClick={() => setParticipant(p.id)}>
@@ -329,7 +347,7 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
           </div>
         )}
         {hits.map((h) => (
-          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat={!current} terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
+          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat={allChats} terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
         ))}
         {total !== null && hits.length < total && (
           <button
