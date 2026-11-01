@@ -70,6 +70,9 @@ cargo run -p chat-core --release --bin icv-parse -- path/to/message_1.html
 # list the exports and chats found in any mix of folders and ZIPs (reads names only)
 cargo run -p chat-core --release --bin icv-scan -- path/to/backup.zip path/to/folder
 
+# store all chat media from the inputs into a scratch library and report dedup/types
+cargo run -p chat-core --release --bin icv-media -- --library path/to/scratch-library path/to/backup.zip
+
 # parse every inbox message_*.html under a real export (absolute path)
 ICV_SAMPLE_DIR=/abs/path/to/examples cargo test -p chat-core --release --test parse -- --ignored --nocapture
 ```

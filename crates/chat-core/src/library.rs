@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 
 use crate::error::IoContext;
+use crate::media::MediaStore;
 use crate::{db, Result};
 
 pub const DB_FILE: &str = "library.db";
@@ -27,11 +28,17 @@ impl Library {
             std::fs::create_dir_all(&path).at(path)?;
         }
         let conn = db::open(&root.join(DB_FILE))?;
-        Ok(Self { root, conn })
+        let lib = Self { root, conn };
+        lib.media().clean_staging()?;
+        Ok(lib)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn media(&self) -> MediaStore {
+        MediaStore::new(&self.root)
     }
 
     pub fn conn(&self) -> &Connection {
