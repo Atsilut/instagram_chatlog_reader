@@ -92,6 +92,8 @@ export interface SearchQuery {
   order: SearchOrder;
   offset: number;
   limit: number;
+  /** Also match word forms (loved, have loved) and typos of them. */
+  similarWords: boolean;
 }
 
 export interface HitView {

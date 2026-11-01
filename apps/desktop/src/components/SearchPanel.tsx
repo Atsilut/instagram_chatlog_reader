@@ -42,6 +42,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [deepMode, setDeepMode] = useState(false);
+  const [similarWords, setSimilarWords] = useState(() => localStorage.getItem("icv-similar-words") !== "0");
   const [order, setOrder] = useState<SearchOrder>("oldest");
   const [hits, setHits] = useState<HitView[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -91,7 +92,14 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
       setLoading(true);
       setError(null);
       try {
-        const r = await api.search({ text: query, filters, order: order === "bestMatch" ? "oldest" : order, offset, limit: PAGE });
+        const r = await api.search({
+          text: query,
+          filters,
+          order: order === "bestMatch" ? "oldest" : order,
+          offset,
+          limit: PAGE,
+          similarWords,
+        });
         if (id !== requestId.current) return;
         setTotal(r.total);
         setHits((h) => (offset === 0 ? r.hits : [...h, ...r.hits]));
@@ -101,7 +109,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
         if (id === requestId.current) setLoading(false);
       }
     },
-    [api, query, filters, order],
+    [api, query, filters, order, similarWords],
   );
 
   useEffect(() => {
@@ -214,6 +222,21 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Escape" && onClose()}
         />
+        <label className="group relative flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1 text-sm">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-indigo-600"
+            checked={similarWords}
+            onChange={(e) => {
+              setSimilarWords(e.target.checked);
+              localStorage.setItem("icv-similar-words", e.target.checked ? "1" : "0");
+            }}
+          />
+          <span>Include similar words</span>
+          <span className="pointer-events-none absolute top-full left-0 z-20 mt-1 hidden w-80 rounded-lg bg-zinc-900 p-2.5 text-xs leading-relaxed text-white shadow-lg group-hover:block dark:bg-zinc-100 dark:text-zinc-900">
+            On: searching "love" also finds "loved", "have loved", "had loved" and typos such as "lovef" and "havr loved". Off: the normal search finds "love" and close typos such as "kove" only. "loved" and "lovely" then show up with deep search.
+          </span>
+        </label>
         <label className="flex cursor-pointer items-start gap-2 rounded-lg px-1 py-1 text-sm">
           <input type="checkbox" className="mt-0.5 accent-indigo-600" checked={deepMode} onChange={(e) => toggleDeep(e.target.checked)} />
           <span>

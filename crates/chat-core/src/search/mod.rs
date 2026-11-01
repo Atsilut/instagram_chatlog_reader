@@ -96,6 +96,10 @@ pub struct SearchQuery {
     #[serde(default)]
     pub offset: usize,
     pub limit: usize,
+    /// Also match word forms and typos of them (loved, have loved, lovef).
+    /// When false, only the word itself and its own common typos match.
+    #[serde(default)]
+    pub similar_words: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -251,7 +255,7 @@ impl SearchIndex {
     }
 
     pub fn search(&self, q: &SearchQuery) -> Result<SearchResults> {
-        let Some(query) = self.build_query(&q.text, &q.filters) else {
+        let Some(query) = self.build_query(&q.text, &q.filters, q.similar_words) else {
             return Ok(SearchResults::default());
         };
         let searcher = self.reader.searcher();
@@ -277,7 +281,12 @@ impl SearchIndex {
         Ok(SearchResults { total, message_ids })
     }
 
-    fn build_query(&self, text: &str, filters: &Filters) -> Option<Box<dyn Query>> {
+    fn build_query(
+        &self,
+        text: &str,
+        filters: &Filters,
+        q_similar: bool,
+    ) -> Option<Box<dyn Query>> {
         let norm = normalize(text);
         let words: Vec<&str> = norm.split_whitespace().collect();
         if words.is_empty() {
@@ -286,7 +295,7 @@ impl SearchIndex {
 
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = words
             .iter()
-            .map(|w| (Occur::Must, self.word_query(w)))
+            .map(|w| (Occur::Must, self.word_query(w, q_similar)))
             .collect();
         for (field, value) in [
             (self.f.thread_id, filters.thread_id),
@@ -318,8 +327,9 @@ impl SearchIndex {
         Some(Box::new(BooleanQuery::new(clauses)))
     }
 
-    /// The word, its forms and one typo of each. Korean words may carry a particle.
-    fn word_query(&self, word: &str) -> Box<dyn Query> {
+    /// The word and its common typos. With `similar`, also its forms and typos of them.
+    /// Korean words may carry a particle.
+    fn word_query(&self, word: &str, similar: bool) -> Box<dyn Query> {
         let hangul = word.chars().any(is_hangul_jamo);
         let one = |w: &str| -> Box<dyn Query> {
             let term = Term::from_field_text(self.f.words, w);
@@ -329,7 +339,7 @@ impl SearchIndex {
                 Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs))
             }
         };
-        let mut terms = if hangul {
+        let mut terms = if hangul || !similar {
             let mut terms = common_typos(word);
             terms.push(word.to_string());
             terms

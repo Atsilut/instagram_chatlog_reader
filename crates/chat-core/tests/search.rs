@@ -59,6 +59,7 @@ fn q(text: &str) -> SearchQuery {
     SearchQuery {
         text: text.into(),
         limit: 20,
+        similar_words: true,
         ..Default::default()
     }
 }
@@ -160,6 +161,25 @@ fn word_forms_match_and_derivations_do_not() {
         vec!["we have loved it ever since", "she had loved it too"]
     );
     assert!(texts(&lib, &index, q("kove")).contains(&"I used to love it".to_string()));
+}
+
+#[test]
+fn similar_words_can_be_turned_off() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    let mut exact = q("love");
+    exact.similar_words = false;
+    let found = texts(&lib, &index, exact);
+    assert!(found.contains(&"I love that polite cat".to_string()));
+    assert!(found.contains(&"I used to love it".to_string()));
+    assert!(
+        !found.iter().any(|t| t.contains("loved")),
+        "word forms need the option or deep search"
+    );
+
+    let mut typo = q("kove");
+    typo.similar_words = false;
+    assert!(texts(&lib, &index, typo).contains(&"I love that polite cat".to_string()));
 }
 
 #[test]
