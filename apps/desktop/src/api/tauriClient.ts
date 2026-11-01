@@ -9,7 +9,6 @@ import type { ApiClient, Unlisten } from "./client";
 import type {
   DeepDone,
   DeepProgress,
-  HitView,
   ImportFinished,
   ImportProgress,
   IndexProgress,
@@ -19,6 +18,7 @@ import type {
   MessageWindow,
   ParticipantInfo,
   SearchFilters,
+  SearchOrder,
   SearchQuery,
   SearchResponse,
   ThreadSummary,
@@ -100,10 +100,6 @@ export class TauriClient implements ApiClient {
     return invoke("cancel_deep_search");
   }
 
-  onDeepHits(cb: (ids: number[]) => void): Promise<Unlisten> {
-    return listen<number[]>("deep://hits", (e) => cb(e.payload));
-  }
-
   onDeepProgress(cb: (p: DeepProgress) => void): Promise<Unlisten> {
     return listen<DeepProgress>("deep://progress", (e) => cb(e.payload));
   }
@@ -112,8 +108,8 @@ export class TauriClient implements ApiClient {
     return listen<DeepDone>("deep://done", (e) => cb(e.payload));
   }
 
-  loadHits(ids: number[]): Promise<HitView[]> {
-    return invoke("load_hits", { ids });
+  deepPage(order: SearchOrder, offset: number, limit: number): Promise<SearchResponse> {
+    return invoke("deep_page", { order, offset, limit });
   }
 
   mediaUrl(storePath: string): string {

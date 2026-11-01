@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 use chat_core::import::{import, ImportOptions, ImportReport, Progress};
 use chat_core::library::{LibraryStats, SEARCH_INDEX_DIR};
 use chat_core::query::{self, HitView, MessageView, ParticipantInfo, ThreadSummary, Window};
-use chat_core::search::deep::{deep_search, DeepProgress};
-use chat_core::search::{Filters, IndexProgress, SearchIndex, SearchQuery};
+use chat_core::search::deep::{deep_search, sort_hits, DeepHit, DeepProgress};
+use chat_core::search::{Filters, IndexProgress, SearchIndex, SearchQuery, SortOrder};
 use chat_core::Library;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -18,7 +18,6 @@ const IMPORT_PROGRESS: &str = "import://progress";
 const IMPORT_FINISHED: &str = "import://finished";
 const INDEX_PROGRESS: &str = "index://progress";
 const INDEX_DONE: &str = "index://done";
-const DEEP_HITS: &str = "deep://hits";
 const DEEP_PROGRESS: &str = "deep://progress";
 const DEEP_DONE: &str = "deep://done";
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
@@ -34,6 +33,8 @@ struct AppState {
     import: Mutex<Option<Arc<AtomicBool>>>,
     /// Cancel flag of the running deep search, if any.
     deep: Mutex<Option<Arc<AtomicBool>>>,
+    /// Matches of the latest deep search, kept so pages can be read in any order.
+    deep_hits: Arc<Mutex<Vec<DeepHit>>>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -179,12 +180,30 @@ async fn search(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<Sea
     })
 }
 
-/// Full messages for ids from a deep search.
+/// A page of the latest deep search's matches (found so far, if still running).
 #[tauri::command]
-async fn load_hits(state: State<'_, AppState>, ids: Vec<i64>) -> CmdResult<Vec<HitView>> {
-    let ids = &ids[..ids.len().min(MAX_PAGE)];
+async fn deep_page(
+    state: State<'_, AppState>,
+    order: SortOrder,
+    offset: usize,
+    limit: usize,
+) -> CmdResult<SearchResponse> {
+    let (total, ids) = {
+        let mut hits = state.deep_hits.lock().map_err(err)?.clone();
+        sort_hits(&mut hits, order);
+        let ids: Vec<i64> = hits
+            .iter()
+            .skip(offset)
+            .take(limit.clamp(1, MAX_PAGE))
+            .map(|h| h.message_id)
+            .collect();
+        (hits.len(), ids)
+    };
     let lib = state.library.lock().map_err(err)?;
-    query::messages_by_ids(lib.conn(), ids).map_err(err)
+    Ok(SearchResponse {
+        total,
+        hits: query::messages_by_ids(lib.conn(), &ids).map_err(err)?,
+    })
 }
 
 #[tauri::command]
@@ -196,8 +215,8 @@ async fn index_status(state: State<'_, AppState>) -> CmdResult<IndexStatus> {
     })
 }
 
-/// Scans every message in the background. Matching ids stream in as `deep://hits`
-/// events; a new deep search cancels the previous one.
+/// Scans every message in the background, collecting matches for [`deep_page`].
+/// Progress arrives as events; a new deep search cancels the previous one.
 #[tauri::command]
 fn start_deep_search(
     app: AppHandle,
@@ -213,6 +232,8 @@ fn start_deep_search(
         }
     }
     let root = state.root.clone();
+    let store = state.deep_hits.clone();
+    store.lock().map_err(err)?.clear();
     std::thread::spawn(move || {
         let throttle = Throttle::new();
         let result = Library::open(&root).and_then(|lib| {
@@ -222,8 +243,12 @@ fn start_deep_search(
                 &filters,
                 None,
                 Some(&cancel),
-                &mut |ids| {
-                    let _ = app.emit(DEEP_HITS, ids);
+                &mut |hits| {
+                    if !cancel.load(Ordering::Relaxed) {
+                        if let Ok(mut all) = store.lock() {
+                            all.extend(hits);
+                        }
+                    }
                 },
                 &mut |p: &DeepProgress| {
                     if throttle.ready(p.scanned == p.total) {
@@ -387,6 +412,7 @@ pub fn run() {
                 indexing: Arc::new(AtomicBool::new(false)),
                 import: Mutex::new(None),
                 deep: Mutex::new(None),
+                deep_hits: Arc::new(Mutex::new(Vec::new())),
             });
             spawn_indexing(app.handle());
             Ok(())
@@ -397,7 +423,7 @@ pub fn run() {
             load_messages,
             set_alias,
             search,
-            load_hits,
+            deep_page,
             index_status,
             start_deep_search,
             cancel_deep_search,

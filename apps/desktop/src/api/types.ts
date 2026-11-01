@@ -83,7 +83,8 @@ export interface SearchFilters {
   toMinute?: number | null;
 }
 
-export type SearchOrder = "relevance" | "newest" | "oldest";
+/** `bestMatch` is only meaningful for deep search. */
+export type SearchOrder = "bestMatch" | "oldest" | "newest";
 
 export interface SearchQuery {
   text: string;

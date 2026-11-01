@@ -3,7 +3,6 @@
 import type {
   DeepDone,
   DeepProgress,
-  HitView,
   ImportFinished,
   ImportProgress,
   IndexProgress,
@@ -13,6 +12,7 @@ import type {
   MessageWindow,
   ParticipantInfo,
   SearchFilters,
+  SearchOrder,
   SearchQuery,
   SearchResponse,
   ThreadSummary,
@@ -44,13 +44,13 @@ export interface ApiClient {
   indexStatus(): Promise<IndexStatus>;
   onIndexProgress(cb: (p: IndexProgress) => void): Promise<Unlisten>;
   onIndexDone(cb: () => void): Promise<Unlisten>;
-  /** Scans every message; matching ids arrive through `onDeepHits`. */
+  /** Scans every message in the background; read matches with `deepPage`. */
   startDeepSearch(text: string, filters: SearchFilters): Promise<void>;
   cancelDeepSearch(): Promise<void>;
-  onDeepHits(cb: (ids: number[]) => void): Promise<Unlisten>;
   onDeepProgress(cb: (p: DeepProgress) => void): Promise<Unlisten>;
   onDeepDone(cb: (d: DeepDone) => void): Promise<Unlisten>;
-  loadHits(ids: number[]): Promise<HitView[]>;
+  /** A page of the latest deep search's matches so far. */
+  deepPage(order: SearchOrder, offset: number, limit: number): Promise<SearchResponse>;
 
   /** URL for a stored media file (`storePath` is relative to the library root). */
   mediaUrl(storePath: string): string;
