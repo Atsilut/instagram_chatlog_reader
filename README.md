@@ -42,7 +42,35 @@ This app does **not** connect to Instagram or Meta. It reads only the files prod
 
 Example exports for local testing go in `examples/`. That folder is git-ignored. **Never commit real chat data.** Automated tests use synthetic fixtures. An optional real-data test reads from the path in the `ICV_SAMPLE_DIR` environment variable.
 
-Build and run instructions will be added once the project is scaffolded.
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (the toolchain version is pinned in `rust-toolchain.toml` and installed automatically by rustup)
+- [Node.js](https://nodejs.org/) 20 or newer
+- Tauri system dependencies for your OS: see [Tauri prerequisites](https://tauri.app/start/prerequisites/). WebView2 is preinstalled on Windows 10/11.
+
+### Run
+
+```sh
+cd apps/desktop
+npm install
+npm run tauri dev
+```
+
+The app creates its library (database, media, search index) in the OS app-data folder, for example `%APPDATA%\com.atsilut.instagramchatviewer\library` on Windows.
+
+### Test
+
+```sh
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+```
+
+### Project layout
+
+```
+crates/chat-core/      import, merge, storage, search (shared by every app)
+apps/desktop/          React UI (src/) + Tauri shell (src-tauri/)
+```
 
 ## License
 

@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["crates/chat-core", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-or-later"
+authors = ["Atsilut"]
+repository = "https://github.com/Atsilut/instagram_chatlog_reader"
+
+# https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
