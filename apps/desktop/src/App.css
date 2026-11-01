@@ -1,0 +1,65 @@
+:root {
+  font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #1a1a1f;
+  background: #f6f6f8;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #ececf1;
+    background: #121216;
+  }
+}
+
+body {
+  margin: 0;
+}
+
+.shell {
+  max-width: 640px;
+  margin: 15vh auto 0;
+  padding: 0 24px;
+}
+
+.shell h1 {
+  font-size: 28px;
+  font-weight: 650;
+  margin: 0 0 24px;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.stats div {
+  padding: 16px;
+  border-radius: 12px;
+  background: rgb(127 127 140 / 0.12);
+}
+
+.stats dt {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.stats dd {
+  margin: 4px 0 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.muted {
+  opacity: 0.6;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+.error {
+  color: #d93a3a;
+}
