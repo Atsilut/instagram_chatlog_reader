@@ -4,15 +4,16 @@
 //!
 //! The Tantivy index lives on disk next to the database and is kept in sync from
 //! `index_queue`, which the import fills. Messages are indexed as normalized words
-//! (see [`normalize`]). The normal search is strict: every query word must appear as
-//! the same word or one of its common typos (a neighbouring key or two swapped
-//! letters, see [`typos`]). Korean words also match with a particle attached
-//! ("인절미" finds "인절미를").
+//! (see [`normalize`]). The normal search matches each query word as itself, as one of
+//! its forms (loved, have loved, used to love; see [`inflect`]) or as a common typo of
+//! any of those (a neighbouring key or two swapped letters; see [`typos`]). Korean
+//! words also match with a particle attached ("인절미" finds "인절미를").
 //!
 //! Related words, heavier typos and missing spaces are left to [`deep::deep_search`],
 //! which checks every message.
 
 pub mod deep;
+pub mod inflect;
 pub mod normalize;
 pub mod typos;
 
@@ -36,6 +37,7 @@ use tantivy::{
 
 use crate::error::IoContext;
 use crate::{Error, Result};
+use inflect::query_terms;
 use normalize::{normalize, stretched_forms};
 use typos::{common_typos, is_hangul_jamo};
 
@@ -316,7 +318,7 @@ impl SearchIndex {
         Some(Box::new(BooleanQuery::new(clauses)))
     }
 
-    /// The word itself or one of its common typos. Korean words may carry a particle.
+    /// The word, its forms and one typo of each. Korean words may carry a particle.
     fn word_query(&self, word: &str) -> Box<dyn Query> {
         let hangul = word.chars().any(is_hangul_jamo);
         let one = |w: &str| -> Box<dyn Query> {
@@ -327,9 +329,27 @@ impl SearchIndex {
                 Box::new(TermQuery::new(term, IndexRecordOption::WithFreqs))
             }
         };
-        let mut alternatives: Vec<(Occur, Box<dyn Query>)> =
-            vec![(Occur::Should, Box::new(BoostQuery::new(one(word), 2.0)))];
-        alternatives.extend(common_typos(word).iter().map(|t| (Occur::Should, one(t))));
+        let mut terms = if hangul {
+            let mut terms = common_typos(word);
+            terms.push(word.to_string());
+            terms
+        } else {
+            query_terms(word)
+        };
+        terms.sort();
+        terms.dedup();
+        let alternatives = terms
+            .iter()
+            .map(|t| {
+                let query = one(t);
+                let query: Box<dyn Query> = if t == word {
+                    Box::new(BoostQuery::new(query, 2.0))
+                } else {
+                    query
+                };
+                (Occur::Should, query)
+            })
+            .collect();
         Box::new(BooleanQuery::new(alternatives))
     }
 }

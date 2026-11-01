@@ -19,6 +19,9 @@ fn chat() -> Vec<M> {
         m("Joy", "Jul 04, 2025 6:00 pm", "the weather is wierd"),
         m(ME, "Jul 05, 2025 6:00 pm", "I love that polite cat"),
         m("Joy", "Jul 06, 2025 6:00 pm", "what a lovely day"),
+        m(ME, "Jul 06, 2025 7:00 pm", "we have loved it ever since"),
+        m("Joy", "Jul 06, 2025 8:00 pm", "she had loved it too"),
+        m(ME, "Jul 06, 2025 9:00 pm", "I used to love it"),
     ]
 }
 
@@ -94,9 +97,8 @@ fn finds_the_same_word_in_every_chat_oldest_first() {
 fn accepts_common_typos_only() {
     let tmp = tempfile::tempdir().unwrap();
     let (lib, index) = setup(tmp.path());
-    assert_eq!(
-        texts(&lib, &index, q("kove")),
-        vec!["I love that polite cat"],
+    assert!(
+        texts(&lib, &index, q("kove")).contains(&"I love that polite cat".to_string()),
         "neighbouring key"
     );
     assert_eq!(
@@ -109,11 +111,9 @@ fn accepts_common_typos_only() {
         "swapped letters"
     );
 
-    assert_eq!(
-        texts(&lib, &index, q("love")),
-        vec!["I love that polite cat"],
-        "not lovely"
-    );
+    let love = texts(&lib, &index, q("love"));
+    assert!(love.contains(&"I love that polite cat".to_string()));
+    assert!(!love.iter().any(|t| t.contains("lovely")), "not lovely");
     assert!(
         texts(&lib, &index, q("japanse")).is_empty(),
         "missing letter is for deep search"
@@ -122,6 +122,44 @@ fn accepts_common_typos_only() {
         texts(&lib, &index, q("goodmorning")).is_empty(),
         "missing space is for deep search"
     );
+}
+
+#[test]
+fn word_forms_match_and_derivations_do_not() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    let found = texts(&lib, &index, q("love"));
+    for text in [
+        "I love that polite cat",
+        "we have loved it ever since",
+        "she had loved it too",
+        "I used to love it",
+    ] {
+        assert!(found.contains(&text.to_string()), "missing {text}");
+    }
+    assert!(
+        !found.iter().any(|t| t.contains("lovely")),
+        "lovely stays a deep search result"
+    );
+
+    let lovef = texts(&lib, &index, q("lovef"));
+    for text in [
+        "I love that polite cat",
+        "we have loved it ever since",
+        "she had loved it too",
+        "I used to love it",
+    ] {
+        assert!(
+            lovef.contains(&text.to_string()),
+            "lovef should find {text}"
+        );
+    }
+    assert!(!lovef.iter().any(|t| t.contains("lovely")));
+    assert_eq!(
+        texts(&lib, &index, q("havr loved")),
+        vec!["we have loved it ever since", "she had loved it too"]
+    );
+    assert!(texts(&lib, &index, q("kove")).contains(&"I used to love it".to_string()));
 }
 
 #[test]
@@ -231,7 +269,13 @@ fn deep_search_finds_related_words_heavy_typos_and_split_words() {
     let ids: Vec<i64> = love.iter().map(|h| h.message_id).collect();
     assert_eq!(
         texts_of(&lib, &ids),
-        vec!["I love that polite cat", "what a lovely day"]
+        vec![
+            "I love that polite cat",
+            "what a lovely day",
+            "we have loved it ever since",
+            "she had loved it too",
+            "I used to love it",
+        ]
     );
 
     let japanese = deep(&lib, "studyng japnes");

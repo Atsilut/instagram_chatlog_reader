@@ -209,7 +209,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
         <input
           ref={input}
           className="w-full rounded-lg bg-zinc-100 px-3 py-2 text-sm outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-indigo-500 dark:bg-zinc-900"
-          placeholder="Search words"
+          placeholder="Search words, including word forms"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Escape" && onClose()}
@@ -218,7 +218,7 @@ export function SearchPanel({ threads, current, initialScope, onOpen, onClose }:
           <input type="checkbox" className="mt-0.5 accent-indigo-600" checked={deepMode} onChange={(e) => toggleDeep(e.target.checked)} />
           <span>
             <span className="font-medium">Deep search</span>
-            <span className="block text-xs text-zinc-500">Also finds related words, heavier typos and words written without spaces. Checks every message, so it's slower.</span>
+            <span className="block text-xs text-zinc-500">Also finds related words such as lovely, heavier typos and words written without spaces. Checks every message, so it's slower.</span>
           </span>
         </label>
         <div className="flex gap-2 text-xs">
