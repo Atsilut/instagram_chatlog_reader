@@ -21,6 +21,21 @@ pub enum Error {
         source: zip::result::ZipError,
     },
 
+    /// A chain of ZIPs inside ZIPs went past the depth this importer will open.
+    #[error("nested ZIP is deeper than {max} levels at {label}")]
+    NestedTooDeep { label: String, max: usize },
+
+    /// A nested ZIP claims an unpacked size far beyond its compressed size.
+    #[error(
+        "ZIP entry {entry} in {label} expands from {compressed} bytes to {uncompressed} bytes"
+    )]
+    ZipExpandsTooFar {
+        label: String,
+        entry: String,
+        compressed: u64,
+        uncompressed: u64,
+    },
+
     #[error("library database version {found} is newer than this app supports ({supported})")]
     SchemaTooNew { found: i64, supported: i64 },
 

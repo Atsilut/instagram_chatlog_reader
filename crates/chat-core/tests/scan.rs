@@ -350,3 +350,161 @@ fn nested_zip_scratch_is_cleaned_up() {
     }
     assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
 }
+
+/// `outer.zip` → `meta-*.zip` → `instagram-*.zip` → the export tree.
+#[test]
+fn three_levels_of_zip_keep_owner_time_pages_and_media() {
+    let tmp = tempfile::tempdir().unwrap();
+    // The zip's own name is the instagram/meta folder. Its entries start at
+    // your_instagram_activity, the same shape as a Meta download.
+    let instagram = zip_bytes(&export_files());
+    let meta = zip_bytes(&[("instagram-bob-2026-06-17-abc.zip".into(), instagram)]);
+    let outer = write_zip(
+        &tmp.path().join("outer.zip"),
+        &[("year/meta-2026-Jun-17-22-21-58.zip".into(), meta)],
+    );
+
+    let scratch = tmp.path().join("scratch");
+    let s = scan(&[outer], &scratch).unwrap();
+    assert_eq!(s.exports.len(), 1);
+    assert_eq!(s.exports[0].owner_username.as_deref(), Some("bob"));
+    assert_eq!(
+        s.exports[0].exported_at.unwrap().to_string(),
+        "2026-06-17 22:21:58"
+    );
+    assert_eq!(
+        s.exports[0].key,
+        "outer/year/meta-2026-Jun-17-22-21-58/instagram-bob-2026-06-17-abc"
+    );
+    assert_full_export(&s, 0);
+    let alice = s
+        .threads
+        .iter()
+        .position(|t| t.folder.as_deref() == Some("alice_111"))
+        .unwrap();
+    assert_eq!(page_text(&s, alice, 0), "alice page 1");
+    let media = s.find_media(&format!("{MSG}/inbox/alice_111/audio/2.mp4"));
+    assert_eq!(s.vfs.read(media[0]).unwrap(), b"mp4");
+    drop(s);
+    assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+}
+
+/// One zip holds two export zips, and one of those holds a further export zip.
+#[test]
+fn sibling_zips_and_a_zip_inside_one_of_them() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bob = zip_bytes(&prefixed("instagram-bob-2026-06-17-abc/", export_files()));
+    let amy = zip_bytes(&prefixed("instagram-amy-2026-07-01-qrs/", export_files()));
+    let pack = zip_bytes(&[("instagram-amy-2026-07-01-qrs.zip".into(), amy)]);
+    let outer = write_zip(
+        &tmp.path().join("outer.zip"),
+        &[
+            ("bob/instagram-bob-2026-06-17-abc.zip".into(), bob),
+            ("packs/amy-pack.zip".into(), pack),
+        ],
+    );
+
+    let s = run(&[outer], tmp.path());
+    let mut owners: Vec<_> = s
+        .exports
+        .iter()
+        .filter_map(|e| e.owner_username.clone())
+        .collect();
+    owners.sort();
+    assert_eq!(owners, vec!["amy", "bob"]);
+    assert_eq!(s.threads.len(), 4);
+    assert_eq!(s.report.skipped_request_pages, 2);
+}
+
+#[test]
+fn folder_whose_zip_contains_another_zip() {
+    let tmp = tempfile::tempdir().unwrap();
+    let inner = zip_bytes(&prefixed("instagram-bob-2026-06-17-abc/", export_files()));
+    let dir = tmp.path().join("backups");
+    let zip = write_zip(
+        &dir.join("june.zip"),
+        &[("instagram-bob-2026-06-17-abc.zip".into(), inner)],
+    );
+
+    let s = run(&[zip], tmp.path());
+    assert_eq!(s.exports.len(), 1);
+    assert_eq!(s.exports[0].owner_username.as_deref(), Some("bob"));
+    assert_full_export(&s, 0);
+    let alice = s
+        .threads
+        .iter()
+        .position(|t| t.folder.as_deref() == Some("alice_111"))
+        .unwrap();
+    assert_eq!(page_text(&s, alice, 1), "alice page 2");
+}
+
+#[test]
+fn corrupt_nested_zip_names_the_archive_chain() {
+    let tmp = tempfile::tempdir().unwrap();
+    let outer = write_zip(
+        &tmp.path().join("outer.zip"),
+        &[("year/inner.zip".into(), b"not a zip".to_vec())],
+    );
+    let msg = match scan(&[outer], &tmp.path().join("scratch")) {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("corrupt nested zip should fail"),
+    };
+    assert!(
+        msg.contains("outer.zip!/year/inner.zip"),
+        "error should name the nested archive, got {msg}"
+    );
+}
+
+/// `n` zip layers. Layer 1 is the file on disk; each deeper layer is a `.zip` entry.
+fn zip_chain(layers: usize) -> Vec<u8> {
+    assert!(layers >= 1);
+    let mut bytes = zip_bytes(&[("note.txt".into(), b"hi".to_vec())]);
+    for i in 1..layers {
+        bytes = zip_bytes(&[(format!("level{i}.zip"), bytes)]);
+    }
+    bytes
+}
+
+#[test]
+fn sixteen_zip_layers_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    // outer.zip plus a 15-layer chain stored as one entry is 16 archives.
+    let outer = write_zip(
+        &tmp.path().join("outer.zip"),
+        &[("wrapped.zip".into(), zip_chain(15))],
+    );
+    scan(&[outer], &tmp.path().join("scratch")).expect("16 layers");
+}
+
+#[test]
+fn seventeen_zip_layers_are_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    // outer.zip (1) contains chain.zip, and zip_chain(16) is 16 more layers: 17 total.
+    let outer = write_zip(
+        &tmp.path().join("outer.zip"),
+        &[("chain.zip".into(), zip_chain(16))],
+    );
+    let msg = match scan(&[outer], &tmp.path().join("scratch")) {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("17 zip layers should be refused"),
+    };
+    assert!(
+        msg.contains("16") && msg.contains("outer.zip!/"),
+        "expected a depth-cap error naming the chain, got {msg}"
+    );
+}
+
+#[test]
+fn nested_zip_that_expands_too_far_is_refused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let zeros = vec![0u8; 8 * 1024 * 1024];
+    let outer = write_zip(&tmp.path().join("outer.zip"), &[("bomb.zip".into(), zeros)]);
+    let msg = match scan(&[outer], &tmp.path().join("scratch")) {
+        Err(e) => e.to_string(),
+        Ok(_) => panic!("oversized nested zip should be refused"),
+    };
+    assert!(
+        msg.contains("bomb.zip") && msg.contains("expands"),
+        "expected an expansion refusal, got {msg}"
+    );
+}

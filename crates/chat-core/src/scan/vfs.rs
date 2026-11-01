@@ -20,6 +20,13 @@ use zip::ZipArchive;
 use crate::error::IoContext;
 use crate::{Error, Result};
 
+/// How many ZIP archives may wrap each other. The file the user picked is level 1.
+const MAX_ZIP_DEPTH: usize = 16;
+/// Nested ZIPs smaller than this are extracted even when they compress very well.
+const ZIP_BOMB_MIN_UNPACKED: u64 = 8 * 1024 * 1024;
+/// Unpacked size must be more than this many times the compressed size to be refused.
+const ZIP_BOMB_MAX_RATIO: u64 = 100;
+
 pub type SourceId = usize;
 pub type FileId = usize;
 
@@ -158,7 +165,7 @@ impl Builder {
         if meta.is_dir() {
             self.add_dir(input, &name)
         } else if is_zip_name(&name) {
-            self.add_zip(input, strip_zip_ext(&name), input.display().to_string())
+            self.add_zip(input, strip_zip_ext(&name), input.display().to_string(), 1)
         } else {
             // A single loose file keeps its parent folder name, which may be the
             // thread folder (e.g. `joy_1590353702351299/message_3.html`).
@@ -205,6 +212,7 @@ impl Builder {
                     entry.path(),
                     strip_zip_ext(&vpath),
                     entry.path().display().to_string(),
+                    1,
                 )?;
                 continue;
             }
@@ -219,12 +227,19 @@ impl Builder {
         Ok(())
     }
 
-    fn add_zip(&mut self, path: &Path, prefix: &str, label: String) -> Result<()> {
+    fn add_zip(&mut self, path: &Path, prefix: &str, label: String, depth: usize) -> Result<()> {
+        if depth > MAX_ZIP_DEPTH {
+            return Err(Error::NestedTooDeep {
+                label,
+                max: MAX_ZIP_DEPTH,
+            });
+        }
+        let label_path = PathBuf::from(&label);
         let zip_err = |source| Error::Zip {
-            path: path.to_path_buf(),
+            path: label_path.clone(),
             source,
         };
-        let file = File::open(path).at(path)?;
+        let file = File::open(path).at(label_path.clone())?;
         let mut archive = ZipArchive::new(BufReader::new(file)).map_err(zip_err)?;
         let source = self.sources.len();
         self.sources.push(Source {
@@ -248,7 +263,7 @@ impl Builder {
             }
             let vpath = join(prefix, &name);
             if is_zip_name(&name) {
-                nested.push((index, name, vpath));
+                nested.push((index, name, vpath, entry.compressed_size(), entry.size()));
                 continue;
             }
             self.files.push(VFile {
@@ -259,14 +274,23 @@ impl Builder {
             });
         }
 
-        for (index, name, vpath) in nested {
+        for (index, name, vpath, compressed, uncompressed) in nested {
+            if nested_zip_expands_too_far(compressed, uncompressed) {
+                return Err(Error::ZipExpandsTooFar {
+                    label: label.clone(),
+                    entry: name,
+                    compressed,
+                    uncompressed,
+                });
+            }
+            let child = format!("{label}!/{name}");
             let out = self.scratch_file()?;
             {
                 let mut entry = archive.by_index(index).map_err(zip_err)?;
-                let mut w = File::create(&out).at(&out)?;
-                std::io::copy(&mut entry, &mut w).at(&out)?;
+                let mut w = File::create(&out).at(&*child)?;
+                std::io::copy(&mut entry, &mut w).at(&*child)?;
             }
-            self.add_zip(&out, strip_zip_ext(&vpath), format!("{label}!/{name}"))?;
+            self.add_zip(&out, strip_zip_ext(&vpath), child, depth + 1)?;
         }
 
         self.zips.insert(source, archive);
@@ -310,6 +334,13 @@ fn join(prefix: &str, rel: &str) -> String {
     }
 }
 
+/// A nested ZIP that would unpack to at least 8 MiB and more than 100× its
+/// compressed size is refused before it is written to the scratch directory.
+fn nested_zip_expands_too_far(compressed: u64, uncompressed: u64) -> bool {
+    uncompressed >= ZIP_BOMB_MIN_UNPACKED
+        && uncompressed > compressed.saturating_mul(ZIP_BOMB_MAX_RATIO)
+}
+
 fn is_zip_name(name: &str) -> bool {
     name.len() > 4 && name[name.len() - 4..].eq_ignore_ascii_case(".zip")
 }
@@ -335,6 +366,24 @@ fn is_junk(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zip_expansion_limit() {
+        let packed = 100_000;
+        assert!(!nested_zip_expands_too_far(
+            packed,
+            packed * ZIP_BOMB_MAX_RATIO
+        ));
+        assert!(nested_zip_expands_too_far(
+            packed,
+            packed * ZIP_BOMB_MAX_RATIO + 1
+        ));
+        assert!(!nested_zip_expands_too_far(1, ZIP_BOMB_MIN_UNPACKED - 1));
+        assert!(!nested_zip_expands_too_far(
+            ZIP_BOMB_MIN_UNPACKED,
+            ZIP_BOMB_MIN_UNPACKED
+        ));
+    }
 
     #[test]
     fn zip_names() {
