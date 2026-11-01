@@ -22,7 +22,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use crate::media::{MediaId, MediaStore, Staged};
-use crate::parse::{parse_page, ParsedPage, Part};
+use crate::parse::{parse_page, MessageKind, ParsedMessage, ParsedPage, Part};
 use crate::scan::{scan, Page, Scan, ScanReport, ThreadSource};
 use crate::{Error, Library, Result};
 use fingerprint::{
@@ -204,6 +204,9 @@ impl Run<'_> {
         export_at: Option<i64>,
     ) -> Result<()> {
         let mut threads: HashMap<String, ThreadCtx> = HashMap::new();
+        // Every page, not just the oldest: a group whose first page has two people
+        // would otherwise be frozen as a direct chat.
+        let roster_direct = self.folder_looks_direct(src)?;
         // message_N with the highest N is the oldest.
         let pages: Vec<Page> = src.pages.iter().rev().copied().collect();
         let batch = rayon::current_num_threads().max(2);
@@ -239,6 +242,7 @@ impl Run<'_> {
                     parsed,
                     export_id,
                     export_at,
+                    roster_direct,
                 )?;
             }
         }
@@ -261,6 +265,7 @@ impl Run<'_> {
         parsed: &ParsedPage,
         export_id: i64,
         export_at: Option<i64>,
+        roster_direct: bool,
     ) -> Result<()> {
         self.report.parse_issues += parsed.issues.len();
         if parsed
@@ -279,7 +284,16 @@ impl Run<'_> {
             .or_else(|| src.thread_id.clone())
             .unwrap_or_else(|| format!("title:{}", parsed.title));
         if !threads.contains_key(&key) {
-            let ctx = self.open_thread(conn, src, &key, parsed, page, export_id, export_at)?;
+            let ctx = self.open_thread(
+                conn,
+                src,
+                &key,
+                parsed,
+                page,
+                export_id,
+                export_at,
+                roster_direct,
+            )?;
             threads.insert(key.clone(), ctx);
         }
         let ctx = threads.get_mut(&key).expect("inserted above");
@@ -554,6 +568,7 @@ impl Run<'_> {
         page: Page,
         export_id: i64,
         export_at: Option<i64>,
+        roster_direct: bool,
     ) -> Result<ThreadCtx> {
         let slug = parsed
             .thread
@@ -561,10 +576,6 @@ impl Run<'_> {
             .map(|t| t.folder.clone())
             .or_else(|| src.folder.clone())
             .unwrap_or_else(|| key.to_string());
-        let guess = looks_direct(
-            &parsed.title,
-            parsed.messages.iter().map(|m| m.sender.as_str()),
-        );
         let kind_of = |direct: bool| if direct { "direct" } else { "group" };
 
         let row: Option<(i64, Option<String>, Option<i64>)> = conn
@@ -578,20 +589,24 @@ impl Run<'_> {
             None => {
                 conn.execute(
                     "INSERT INTO threads (ig_thread_id, slug, title, kind, title_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![key, slug, parsed.title, kind_of(guess), export_at],
+                    params![key, slug, parsed.title, kind_of(roster_direct), export_at],
                 )?;
-                (conn.last_insert_rowid(), guess, true)
+                (conn.last_insert_rowid(), roster_direct, true)
             }
             Some((id, kind, title_at)) => {
                 let direct = match kind.as_deref() {
-                    Some("direct") => true,
                     Some("group") => false,
+                    Some("direct") if !roster_direct => {
+                        promote_direct_to_group(conn, id)?;
+                        false
+                    }
+                    Some("direct") => true,
                     _ => {
                         conn.execute(
                             "UPDATE threads SET kind = ?1 WHERE id = ?2",
-                            params![kind_of(guess), id],
+                            params![kind_of(roster_direct), id],
                         )?;
-                        guess
+                        roster_direct
                     }
                 };
                 let newer = match (export_at, title_at) {
@@ -784,6 +799,21 @@ impl Run<'_> {
         Ok(ids)
     }
 
+    /// Direct only when every sender in the folder fits one title and one other person.
+    fn folder_looks_direct(&self, src: &ThreadSource) -> Result<bool> {
+        let mut title = String::new();
+        let mut senders = Vec::new();
+        for page in &src.pages {
+            let bytes = self.scan.vfs.read(page.file)?;
+            let parsed = parse_page(&String::from_utf8_lossy(&bytes));
+            if title.is_empty() && !parsed.title.is_empty() {
+                title = parsed.title;
+            }
+            senders.extend(parsed.messages.into_iter().map(|m| m.sender));
+        }
+        Ok(looks_direct(&title, senders.iter().map(String::as_str)))
+    }
+
     fn progressed(&mut self, chat: &str) -> Result<()> {
         self.pages_done += 1;
         if let Some(f) = self.opts.progress {
@@ -830,6 +860,94 @@ fn prepare<'p>(parsed: &'p ParsedPage, ctx: &ThreadCtx) -> Vec<Incoming<'p>> {
             }
         })
         .collect()
+}
+
+/// A chat stored as one-to-one was really a group. Role keys (`@self`, `@other`)
+/// become display names, and fingerprints are rewritten so the next backup merges.
+fn promote_direct_to_group(conn: &Connection, thread: i64) -> Result<()> {
+    conn.execute("UPDATE threads SET kind = 'group' WHERE id = ?1", [thread])?;
+    conn.execute(
+        "UPDATE participants SET sender_key = display_name
+         WHERE thread_id = ?1 AND sender_key IN ('@self', '@other')",
+        [thread],
+    )?;
+
+    let messages: Vec<(i64, i64, String, Option<String>, String)> = {
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.ts_minute, m.kind, m.text, p.sender_key
+             FROM messages m JOIN participants p ON p.id = m.participant_id
+             WHERE m.thread_id = ?1",
+        )?;
+        let rows = stmt.query_map([thread], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let mut parts_stmt = conn.prepare(
+        "SELECT type, url, caption, author FROM message_parts WHERE message_id = ?1 ORDER BY idx",
+    )?;
+    for (id, ts, kind, text, sender) in messages {
+        let parts: Vec<Part> = parts_stmt
+            .query_map([id], |r| {
+                Ok(stored_part(r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
+            .collect::<std::result::Result<_, _>>()?;
+        let msg = ParsedMessage {
+            sender: sender.clone(),
+            timestamp: chrono::NaiveDateTime::default(),
+            kind: message_kind(&kind),
+            text,
+            parts,
+            reactions: Vec::new(),
+            raw_html: None,
+        };
+        let ck = content_key(&sender, &msg);
+        let fp = fingerprint(ts, &ck);
+        conn.execute(
+            "UPDATE messages SET content_key = ?1, fp = ?2 WHERE id = ?3",
+            params![&ck[..], &fp[..], id],
+        )?;
+    }
+    conn.execute("DELETE FROM day_digests WHERE thread_id = ?1", [thread])?;
+    Ok(())
+}
+
+fn message_kind(kind: &str) -> MessageKind {
+    match kind {
+        "media" => MessageKind::Media,
+        "share" => MessageKind::Share,
+        "link" => MessageKind::Link,
+        "reaction_notice" => MessageKind::ReactionNotice,
+        "like" => MessageKind::Like,
+        "empty" => MessageKind::Empty,
+        _ => MessageKind::Text,
+    }
+}
+
+fn stored_part(
+    type_: String,
+    url: Option<String>,
+    caption: Option<String>,
+    author: Option<String>,
+) -> Part {
+    let path = url.clone().unwrap_or_default();
+    match type_.as_str() {
+        "video" => Part::Video { path },
+        "audio" => Part::Audio { path },
+        "gif" => Part::Gif { path },
+        "file" => Part::File { path },
+        "share" => Part::Share {
+            caption,
+            author,
+            url,
+        },
+        "link" => Part::Link {
+            url: path,
+            title: caption,
+        },
+        "remote_gif" => Part::RemoteGif { url: path },
+        _ => Part::Photo { path },
+    }
 }
 
 fn minutes(t: chrono::NaiveDateTime) -> i64 {

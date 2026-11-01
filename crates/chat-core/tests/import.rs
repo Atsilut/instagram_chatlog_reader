@@ -45,6 +45,73 @@ fn base_chat() -> Vec<M> {
 }
 
 #[test]
+fn a_third_person_on_a_later_page_keeps_the_chat_a_group() {
+    let tmp = tempfile::tempdir().unwrap();
+    let msgs = vec![
+        m("Ann", "Jul 01, 2025 9:00 am", "hello there friend"),
+        m(ME, "Jul 01, 2025 9:01 am", "hello there back"),
+        m("Cat", "Jul 01, 2025 9:02 am", "joining this conversation"),
+    ];
+    // Two per page, so the oldest page is only Ann and Bob and the title is Ann.
+    let export = write_export(tmp.path(), "2025-07-02", "Ann", &msgs, 2, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[export]);
+
+    let kind: String = lib
+        .conn()
+        .query_row("SELECT kind FROM threads", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kind, "group");
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 3);
+    let keys = sender_keys(&lib);
+    assert!(
+        keys.iter().all(|k| !k.starts_with('@')),
+        "group senders keep display names, got {keys:?}"
+    );
+}
+
+#[test]
+fn a_later_backup_that_reveals_a_group_does_not_duplicate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let msgs = vec![
+        m("Ann", "Jul 01, 2025 9:00 am", "hello there friend"),
+        m(ME, "Jul 01, 2025 9:01 am", "hello there back"),
+        m("Cat", "Jul 01, 2025 9:02 am", "joining this conversation"),
+    ];
+    let first = write_export(tmp.path(), "2025-07-02", "Ann", &msgs[..2], 10, &[]);
+    let second = write_export(tmp.path(), "2025-07-03", "Ann", &msgs, 10, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[first]);
+    run(&mut lib, &[second]);
+
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 3);
+    let kind: String = lib
+        .conn()
+        .query_row("SELECT kind FROM threads", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kind, "group");
+    assert_eq!(
+        texts(&lib),
+        vec![
+            "hello there friend",
+            "hello there back",
+            "joining this conversation",
+        ]
+    );
+}
+
+fn sender_keys(lib: &Library) -> Vec<String> {
+    let mut stmt = lib
+        .conn()
+        .prepare("SELECT sender_key FROM participants ORDER BY sender_key")
+        .unwrap();
+    stmt.query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[test]
 fn single_import_stores_everything_in_order() {
     let tmp = tempfile::tempdir().unwrap();
     let export = write_export(tmp.path(), "2025-07-04", "Joy", &base_chat(), 4, &[]);
