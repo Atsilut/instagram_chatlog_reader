@@ -56,7 +56,11 @@ npm install
 npm run tauri dev
 ```
 
-The app creates its library (database, media, search index) in the OS app-data folder, for example `%APPDATA%\com.atsilut.instagramchatviewer\library` on Windows.
+The app creates its library (database, media, search index) in the OS app-data folder, for example `%APPDATA%\com.atsilut.instagramchatviewer\library` on Windows. To try things without touching that library, point the app at a scratch folder:
+
+```powershell
+$env:ICV_LIBRARY_DIR = "C:\temp\icv-lib"; npm run tauri dev
+```
 
 ### Test
 
