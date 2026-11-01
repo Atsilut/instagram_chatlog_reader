@@ -121,7 +121,7 @@ export default function App() {
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
           )}
-          {searchOpen && <SearchPanel threads={threads} onOpen={openHit} onClose={() => setSearchOpen(false)} />}
+          {searchOpen && <SearchPanel threads={threads} current={thread} onOpen={openHit} onClose={() => setSearchOpen(false)} />}
           {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
         </>
       )}

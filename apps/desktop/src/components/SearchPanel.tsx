@@ -14,6 +14,7 @@ const FEW_RESULTS = 5;
 
 interface Props {
   threads: ThreadSummary[];
+  current: ThreadSummary | null;
   /** Opens a chat centred on a message. */
   onOpen: (threadId: number, sortKey: number) => void;
   onClose: () => void;
@@ -33,10 +34,11 @@ function dateToMinute(date: string, endOfDay: boolean): number | null {
   return Date.UTC(y, m - 1, d) / 60_000 + (endOfDay ? 1439 : 0);
 }
 
-export function SearchPanel({ threads, onOpen, onClose }: Props) {
+export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
   const api = useApi();
   useDisplaySettings();
   const [text, setText] = useState("");
+  const [participant, setParticipant] = useState<number | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [deepMode, setDeepMode] = useState(false);
@@ -60,13 +62,16 @@ export function SearchPanel({ threads, onOpen, onClose }: Props) {
 
   const filters: SearchFilters = useMemo(
     () => ({
+      threadId: current?.id ?? null,
+      participantId: current ? participant : null,
       fromMinute: dateToMinute(from, false),
       toMinute: dateToMinute(to, true),
     }),
-    [from, to],
+    [current, participant, from, to],
   );
 
   useEffect(() => input.current?.focus(), []);
+  useEffect(() => setParticipant(null), [current?.id]);
 
   const toggleDeep = (on: boolean) => {
     setDeepMode(on);
@@ -256,6 +261,17 @@ export function SearchPanel({ threads, onOpen, onClose }: Props) {
           </span>
         </label>
         <div className="flex gap-2 text-xs">
+          {current && (
+            <Select value={participant === null ? "" : String(participant)} onChange={(v) => setParticipant(v ? Number(v) : null)}>
+              <option value="">Anyone</option>
+              {current.participants.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {personName(p)}
+                  {p.isOwner ? " (you)" : ""}
+                </option>
+              ))}
+            </Select>
+          )}
           <Select value={order} onChange={(v) => setOrder(v as SearchOrder)}>
             {deepMode && <option value="bestMatch">Best match</option>}
             <option value="oldest">Oldest first</option>
@@ -310,7 +326,7 @@ export function SearchPanel({ threads, onOpen, onClose }: Props) {
           </div>
         )}
         {hits.map((h) => (
-          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
+          <Result key={h.message.id} hit={h} thread={threadsById.get(h.threadId)} showChat={!current} terms={terms} active={selected === h.message.id} onClick={() => open(h)} />
         ))}
         {total !== null && hits.length < total && (
           <button
