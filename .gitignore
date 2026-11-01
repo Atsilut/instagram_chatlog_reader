@@ -1,0 +1,38 @@
+# Private example chat exports (never commit)
+examples/
+
+# Local library data created by the app in dev runs
+library/
+*.db
+*.db-wal
+*.db-shm
+search_index/
+
+# Rust / Cargo
+target/
+
+# Tauri
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+
+# Node / Vite / React
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Env and logs
+.env
+.env.*
+!.env.example
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
