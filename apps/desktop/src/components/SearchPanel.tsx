@@ -260,18 +260,20 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
             </span>
           </span>
         </label>
+        {current && current.participants.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <PersonChoice selected={participant === null} onClick={() => setParticipant(null)}>
+              Both
+            </PersonChoice>
+            {current.participants.map((p) => (
+              <PersonChoice key={p.id} selected={participant === p.id} onClick={() => setParticipant(p.id)}>
+                {personName(p)}
+                {p.isOwner ? " (you)" : ""}
+              </PersonChoice>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 text-xs">
-          {current && (
-            <Select value={participant === null ? "" : String(participant)} onChange={(v) => setParticipant(v ? Number(v) : null)}>
-              <option value="">Anyone</option>
-              {current.participants.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {personName(p)}
-                  {p.isOwner ? " (you)" : ""}
-                </option>
-              ))}
-            </Select>
-          )}
           <Select value={order} onChange={(v) => setOrder(v as SearchOrder)}>
             {deepMode && <option value="bestMatch">Best match</option>}
             <option value="oldest">Oldest first</option>
@@ -342,6 +344,17 @@ export function SearchPanel({ threads, current, onOpen, onClose }: Props) {
   );
 }
 
+function PersonChoice({ selected, onClick, children }: { selected: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      className={`rounded-full px-2.5 py-1 text-xs ${selected ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
 function Select({ value, onChange, children }: { value: string; onChange: (v: string) => void; children: ReactNode }) {
   return (
     <select className="min-w-0 flex-1 rounded-md bg-zinc-100 px-2 py-1 outline-none dark:bg-zinc-900" value={value} onChange={(e) => onChange(e.target.value)}>
@@ -373,7 +386,8 @@ function Result({
       <div className="mb-0.5 flex items-baseline justify-between gap-2 text-xs text-zinc-500">
         <span className="truncate">
           {showChat && thread && <span className="font-semibold text-zinc-700 dark:text-zinc-300">{threadTitle(thread)} · </span>}
-          {sender?.isOwner ? "You" : personName(sender)}
+          {personName(sender)}
+          {sender?.isOwner ? " (you)" : ""}
         </span>
         <span className="shrink-0">{formatStamp(m.tsMinute)}</span>
       </div>
