@@ -163,17 +163,6 @@ pub fn set_alias(conn: &Connection, participant: i64, alias: Option<&str>) -> Re
     Ok(())
 }
 
-/// Marks `participant` as the library owner ("you") in its chat, for when automatic
-/// detection got it wrong. Everyone else in that chat is unmarked.
-pub fn set_owner(conn: &Connection, participant: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE participants SET is_owner = (id = ?1)
-         WHERE thread_id = (SELECT thread_id FROM participants WHERE id = ?1)",
-        [participant],
-    )?;
-    Ok(())
-}
-
 /// Up to `limit` messages of a thread in chronological order.
 pub fn messages(
     conn: &Connection,

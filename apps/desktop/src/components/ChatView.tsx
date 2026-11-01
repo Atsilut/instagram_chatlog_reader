@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { useApi, type MessageView, type ParticipantInfo, type ThreadSummary } from "../api";
-import { avatarColor, dayNumber, formatDay, formatTime, initials, personName, threadTitle } from "../lib/format";
+import { avatarColor, dayNumber, formatDay, formatFullStamp, formatStamp, initials, personName, threadTitle } from "../lib/format";
 import { Lightbox, Part } from "./Parts";
 
 const PAGE = 150;
@@ -119,6 +119,7 @@ export function ChatView({ thread, target, onPeople }: Props) {
   }, [api, thread.id, hasNewer]);
 
   const title = threadTitle(thread);
+  const me = thread.participants.find((p) => p.isOwner);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col">
@@ -126,7 +127,15 @@ export function ChatView({ thread, target, onPeople }: Props) {
         <Avatar name={title} seed={thread.participants.find((p) => !p.isOwner)?.id ?? thread.id} size="md" />
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[15px] font-semibold">{title}</h1>
-          <p className="text-xs text-zinc-500">{thread.messageCount.toLocaleString()} messages</p>
+          <p className="text-xs text-zinc-500">
+            {thread.messageCount.toLocaleString()} messages
+            {me && (
+              <>
+                {" "}
+                · you are <span className="font-medium text-indigo-600 dark:text-indigo-400">{personName(me)}</span>
+              </>
+            )}
+          </p>
         </div>
         <button className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" onClick={onPeople}>
           People
@@ -190,7 +199,7 @@ function MessageRow({
     const what = msg.kind === "like" ? "liked a message" : (msg.text ?? "reacted to a message").replace(/^Reacted/, "reacted").replace(/ to your message$/, " to a message");
     return (
       <p className="px-6 py-1 text-center text-xs text-zinc-500">
-        {mine ? "You" : name} {what} · {formatTime(msg.tsMinute)}
+        {mine ? "You" : name} {what} · {formatStamp(msg.tsMinute)}
       </p>
     );
   }
@@ -210,7 +219,7 @@ function MessageRow({
               className={`rounded-2xl px-3.5 py-2 text-[14px] leading-snug break-words whitespace-pre-wrap ${
                 mine ? "bg-indigo-600 text-white" : "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
               }`}
-              title={formatTime(msg.tsMinute)}
+              title={formatFullStamp(msg.tsMinute)}
             >
               {msg.text}
             </div>
@@ -241,7 +250,7 @@ function MessageRow({
                 Not in latest backup
               </span>
             )}
-            {end && formatTime(msg.tsMinute)}
+            {end && formatStamp(msg.tsMinute)}
           </span>
         )}
       </div>

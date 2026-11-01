@@ -2,22 +2,26 @@
 
 import { useMemo, useState } from "react";
 import type { ThreadSummary } from "../api";
-import { formatShortDate, previewText, sortKeyMinute, threadTitle } from "../lib/format";
+import { formatListDate, previewText, sortKeyMinute, threadTitle } from "../lib/format";
 import { Avatar } from "./ChatView";
+import { progressPercent, type ImportState } from "./ImportDialog";
 
 interface Props {
   threads: ThreadSummary[];
   selected: number | null;
   onSelect: (id: number) => void;
   onImport: () => void;
+  importing: ImportState | null;
 }
 
-export function Sidebar({ threads, selected, onSelect, onImport }: Props) {
+export function Sidebar({ threads, selected, onSelect, onImport, importing }: Props) {
   const [filter, setFilter] = useState("");
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return threads;
-    return threads.filter((t) => [t.title, ...t.participants.flatMap((p) => [p.displayName, p.alias ?? ""])].some((n) => n.toLowerCase().includes(q)));
+    return threads.filter((t) =>
+      [t.title, ...t.participants.filter((p) => !p.isOwner).flatMap((p) => [p.displayName, p.alias ?? ""])].some((n) => n.toLowerCase().includes(q)),
+    );
   }, [threads, filter]);
 
   return (
@@ -34,10 +38,21 @@ export function Sidebar({ threads, selected, onSelect, onImport }: Props) {
           Import
         </button>
       </div>
+      {importing && (
+        <button className="mx-4 mb-3 rounded-lg bg-indigo-50 px-3 py-2 text-left dark:bg-indigo-500/15" onClick={onImport}>
+          <div className="mb-1.5 flex justify-between text-xs font-medium text-indigo-700 dark:text-indigo-300">
+            <span>Importing...</span>
+            <span>{progressPercent(importing) ?? 0}%</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900/50">
+            <div className="h-full rounded-full bg-indigo-600 transition-all" style={{ width: `${progressPercent(importing) ?? 0}%` }} />
+          </div>
+        </button>
+      )}
       <div className="px-4 pb-3">
         <input
           className="w-full rounded-lg bg-zinc-100 px-3 py-2 text-sm outline-none placeholder:text-zinc-500 focus:ring-2 focus:ring-indigo-500 dark:bg-zinc-900"
-          placeholder="Filter chats"
+          placeholder="Search users"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -59,7 +74,7 @@ export function Sidebar({ threads, selected, onSelect, onImport }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="truncate font-semibold">{title}</span>
-                    {t.lastSortKey !== null && <span className="shrink-0 text-[11px] text-zinc-500">{formatShortDate(sortKeyMinute(t.lastSortKey))}</span>}
+                    {t.lastSortKey !== null && <span className="shrink-0 text-[11px] text-zinc-500">{formatListDate(sortKeyMinute(t.lastSortKey))}</span>}
                   </div>
                   <p className="truncate text-[13px] text-zinc-500">
                     {mine ? "You: " : ""}
@@ -70,7 +85,7 @@ export function Sidebar({ threads, selected, onSelect, onImport }: Props) {
             </li>
           );
         })}
-        {shown.length === 0 && threads.length > 0 && <li className="px-3 py-6 text-center text-sm text-zinc-500">No chats match.</li>}
+        {shown.length === 0 && threads.length > 0 && <li className="px-3 py-6 text-center text-sm text-zinc-500">No users match.</li>}
       </ul>
     </aside>
   );

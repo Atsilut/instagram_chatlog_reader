@@ -23,6 +23,45 @@ export const formatTime = (tsMinute: number) => timeFmt.format(minuteDate(tsMinu
 export const formatShortDate = (tsMinute: number) => shortDateFmt.format(minuteDate(tsMinute));
 export const sortKeyMinute = (sortKey: number) => Math.floor(sortKey / SEQ_PER_MINUTE);
 
+const monthDayTimeFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" });
+const fullStampFmt = new Intl.DateTimeFormat(undefined, {
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+const monthDayFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+
+/** The local wall clock now, in the same "minutes as if UTC" form as message times. */
+function nowMinute(): number {
+  const now = new Date();
+  return Math.floor((now.getTime() - now.getTimezoneOffset() * 60_000) / 60_000);
+}
+
+function sameYear(a: Date, b: Date) {
+  return a.getUTCFullYear() === b.getUTCFullYear();
+}
+
+/** Message time: only the time for today, month and day for this year, the full date otherwise. */
+export function formatStamp(tsMinute: number): string {
+  const now = nowMinute();
+  if (dayNumber(tsMinute) === dayNumber(now)) return formatTime(tsMinute);
+  if (sameYear(minuteDate(tsMinute), minuteDate(now))) return monthDayTimeFmt.format(minuteDate(tsMinute));
+  return fullStampFmt.format(minuteDate(tsMinute));
+}
+
+export const formatFullStamp = (tsMinute: number) => fullStampFmt.format(minuteDate(tsMinute));
+
+/** Chat list date: the time for today, month and day for this year, a short full date otherwise. */
+export function formatListDate(tsMinute: number): string {
+  const now = nowMinute();
+  if (dayNumber(tsMinute) === dayNumber(now)) return formatTime(tsMinute);
+  if (sameYear(minuteDate(tsMinute), minuteDate(now))) return monthDayFmt.format(minuteDate(tsMinute));
+  return formatShortDate(tsMinute);
+}
+
 export function personName(p: ParticipantInfo | undefined): string {
   if (!p) return "Unknown";
   return p.alias ?? p.displayName;

@@ -181,50 +181,50 @@ fn messages_carry_media_reactions_and_missing_flag() {
 }
 
 #[test]
-fn owner_can_be_corrected() {
+fn owner_is_recognised_in_group_chats() {
     let tmp = tempfile::tempdir().unwrap();
-    let export = write_chat(
+    write_chat(
         tmp.path(),
         "2025-08-01",
         "joy_111",
         "Joy",
-        &day_chat("x", 2),
+        &[
+            m("Joy", "Jul 01, 2025 9:00 am", "hi"),
+            m(ME, "Jul 01, 2025 9:01 am", "hey"),
+        ],
+        10,
+        &[],
+    );
+    let group = vec![
+        m("Ann", "Jul 02, 2025 9:00 am", "trip?"),
+        m(ME, "Jul 02, 2025 9:01 am", "yes"),
+        m("Cat", "Jul 02, 2025 9:02 am", "me too"),
+    ];
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "trip_222",
+        "Weekend trip",
+        &group,
         10,
         &[],
     );
     let mut lib = library(tmp.path());
     run(&mut lib, &[export]);
-    let t = &query::threads(lib.conn()).unwrap()[0];
-    let joy = t.participants.iter().find(|p| !p.is_owner).unwrap();
 
-    query::set_owner(lib.conn(), joy.id).unwrap();
-    let after = query::participants(lib.conn(), t.id).unwrap();
-    assert_eq!(
-        after
-            .iter()
-            .filter(|p| p.is_owner)
-            .map(|p| p.id)
-            .collect::<Vec<_>>(),
-        vec![joy.id]
-    );
-
-    run(
-        &mut lib,
-        &[write_chat(
-            tmp.path(),
-            "2025-08-02",
-            "joy_111",
-            "Joy",
-            &day_chat("x", 3),
-            10,
-            &[],
-        )],
-    );
-    let again = query::participants(lib.conn(), t.id).unwrap();
-    assert!(
-        again.iter().find(|p| p.id == joy.id).unwrap().is_owner,
-        "re-import keeps the manual choice"
-    );
+    let trip = query::threads(lib.conn())
+        .unwrap()
+        .into_iter()
+        .find(|t| t.title == "Weekend trip")
+        .unwrap();
+    assert_eq!(trip.kind.as_deref(), Some("group"));
+    let owners: Vec<&str> = trip
+        .participants
+        .iter()
+        .filter(|p| p.is_owner)
+        .map(|p| p.display_name.as_str())
+        .collect();
+    assert_eq!(owners, vec![ME]);
 }
 
 #[test]

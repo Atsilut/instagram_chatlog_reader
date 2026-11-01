@@ -57,7 +57,7 @@ export function PeopleDialog({ participants, onSaved, onClose }: Props) {
             <div className="min-w-0 flex-1">
               <div className="mb-1 text-xs text-zinc-500">
                 {p.displayName}
-                {p.isOwner && " (you)"}
+                {p.isOwner && <span className="ml-1 font-semibold text-indigo-600 dark:text-indigo-400">(you)</span>}
               </div>
               <input
                 className="w-full rounded-lg bg-zinc-100 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-zinc-800"

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, type ThreadSummary } from "./api";
 import { ChatView } from "./components/ChatView";
 import { ImportDialog, type ImportState } from "./components/ImportDialog";
@@ -8,15 +8,21 @@ import { Button } from "./components/Modal";
 import { PeopleDialog } from "./components/PeopleDialog";
 import { Sidebar } from "./components/Sidebar";
 
+/** How often the chat list refreshes while an import is running. */
+const LIVE_REFRESH_MS = 3000;
+
 export default function App() {
   const api = useApi();
   const [threads, setThreads] = useState<ThreadSummary[] | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [importState, setImportState] = useState<ImportState | null>(null);
+  const [importVisible, setImportVisible] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastRefresh = useRef(0);
 
   const refresh = useCallback(async () => {
+    lastRefresh.current = Date.now();
     try {
       await api.libraryInfo();
       const list = await api.listThreads();
@@ -33,19 +39,31 @@ export default function App() {
 
   useEffect(() => {
     const subs = [
-      api.onImportProgress((progress) => setImportState({ phase: "running", progress })),
+      api.onImportProgress((progress) => {
+        setImportState({ phase: "running", progress });
+        if (Date.now() - lastRefresh.current > LIVE_REFRESH_MS) refresh();
+      }),
       api.onImportFinished((result) => {
         setImportState({ phase: "done", result });
+        setImportVisible(true);
         refresh();
       }),
-      api.onDropPaths((paths) =>
-        setImportState((s) => (s?.phase === "running" ? s : { phase: "choose", paths: [...new Set([...(s?.phase === "choose" ? s.paths : []), ...paths])] })),
-      ),
+      api.onDropPaths((paths) => {
+        setImportState((s) => (s?.phase === "running" ? s : { phase: "choose", paths: [...new Set([...(s?.phase === "choose" ? s.paths : []), ...paths])] }));
+        setImportVisible(true);
+      }),
     ];
     return () => subs.forEach((p) => p.then((unlisten) => unlisten()));
   }, [api, refresh]);
 
-  const openImport = () => setImportState((s) => (s?.phase === "running" ? s : { phase: "choose", paths: [] }));
+  const openImport = () => {
+    setImportState((s) => (s?.phase === "running" ? s : { phase: "choose", paths: [] }));
+    setImportVisible(true);
+  };
+  const closeImport = () => {
+    setImportVisible(false);
+    setImportState((s) => (s?.phase === "running" ? s : null));
+  };
   const thread = threads?.find((t) => t.id === selected) ?? null;
 
   if (error) return <p className="p-8 text-red-500">{error}</p>;
@@ -53,15 +71,25 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      {threads.length === 0 ? (
+      {threads.length === 0 && importState?.phase !== "running" ? (
         <Welcome onImport={openImport} />
       ) : (
         <>
-          <Sidebar threads={threads} selected={selected} onSelect={setSelected} onImport={openImport} />
-          {thread && <ChatView key={thread.id} thread={thread} onPeople={() => setPeopleOpen(true)} />}
+          <Sidebar
+            threads={threads}
+            selected={selected}
+            onSelect={setSelected}
+            onImport={openImport}
+            importing={importState?.phase === "running" ? importState : null}
+          />
+          {thread ? (
+            <ChatView key={thread.id} thread={thread} onPeople={() => setPeopleOpen(true)} />
+          ) : (
+            <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
+          )}
         </>
       )}
-      {importState && <ImportDialog state={importState} onChange={setImportState} onClose={() => setImportState(null)} />}
+      {importState && importVisible && <ImportDialog state={importState} onChange={setImportState} onClose={closeImport} />}
       {peopleOpen && thread && (
         <PeopleDialog
           participants={thread.participants}

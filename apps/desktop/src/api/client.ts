@@ -22,7 +22,6 @@ export interface ApiClient {
   loadMessages(threadId: number, window: MessageWindow, limit: number): Promise<MessageView[]>;
   /** Returns the thread's participants after the change. */
   setAlias(participantId: number, alias: string | null): Promise<ParticipantInfo[]>;
-
   /** Lets the user choose ZIP files or one folder; resolves to [] when cancelled. */
   pickImportSources(kind: "zip" | "folder"): Promise<string[]>;
   startImport(paths: string[]): Promise<void>;

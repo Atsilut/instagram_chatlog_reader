@@ -111,6 +111,7 @@ pub fn import(lib: &mut Library, inputs: &[PathBuf], opts: &ImportOptions) -> Re
         run.report.exports += 1;
     }
 
+    mark_group_owners(conn)?;
     let mut report = run.report;
     report.threads = run.threads_seen.len();
     report.media_files_stored =
@@ -926,6 +927,19 @@ fn stored_day_digest(tx: &Connection, thread: i64, lo: i64, hi: i64) -> Result<H
     Ok(digest(rows.iter().map(|(id, fp)| {
         (fp, reactions.remove(id).unwrap_or_default())
     })))
+}
+
+/// Group chats key senders by display name, so "you" is found by the display names
+/// you have in one-to-one chats.
+fn mark_group_owners(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE participants SET is_owner = 1
+         WHERE is_owner = 0
+           AND thread_id IN (SELECT id FROM threads WHERE kind = 'group')
+           AND display_name IN (SELECT display_name FROM participants WHERE sender_key = ?1)",
+        [SELF_KEY],
+    )?;
+    Ok(())
 }
 
 fn finish_thread(conn: &Connection, ctx: &ThreadCtx, export_at: Option<i64>) -> Result<()> {

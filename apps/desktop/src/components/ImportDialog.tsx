@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import { useState } from "react";
 import { useApi, type ImportFinished, type ImportProgress } from "../api";
 import { Button, Modal } from "./Modal";
 
@@ -11,17 +12,43 @@ export type ImportState =
 interface Props {
   state: ImportState;
   onChange: (s: ImportState) => void;
+  /** Closes the dialog; a running import keeps going in the background. */
   onClose: () => void;
+}
+
+export function progressPercent(state: ImportState): number | null {
+  if (state.phase !== "running" || !state.progress || state.progress.pages_total === 0) return null;
+  return Math.round((state.progress.pages_done / state.progress.pages_total) * 100);
 }
 
 export function ImportDialog({ state, onChange, onClose }: Props) {
   const api = useApi();
+  const [confirmStop, setConfirmStop] = useState(false);
 
   if (state.phase === "running") {
     const p = state.progress;
-    const pct = p && p.pages_total > 0 ? Math.round((p.pages_done / p.pages_total) * 100) : null;
+    const pct = progressPercent(state);
     return (
-      <Modal title="Importing" footer={<Button onClick={() => api.cancelImport()}>Cancel</Button>}>
+      <Modal
+        title="Importing"
+        onClose={onClose}
+        footer={
+          confirmStop ? (
+            <>
+              <span className="mr-auto self-center text-sm text-zinc-500">Stop now? Everything imported so far is kept.</span>
+              <Button onClick={() => setConfirmStop(false)}>Keep importing</Button>
+              <Button onClick={() => api.cancelImport()}>Stop import</Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={() => setConfirmStop(true)}>Stop import...</Button>
+              <Button primary onClick={onClose}>
+                Hide
+              </Button>
+            </>
+          )
+        }
+      >
         <p className="mb-3 text-sm text-zinc-500">
           {p ? `${p.pages_done.toLocaleString()} of ${p.pages_total.toLocaleString()} pages` : "Scanning your backups..."}
           {p?.chat && <span className="ml-1">· {p.chat}</span>}
@@ -29,7 +56,7 @@ export function ImportDialog({ state, onChange, onClose }: Props) {
         <div className="h-2 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
           <div className={`h-full rounded-full bg-indigo-600 transition-all ${pct === null ? "w-1/3 animate-pulse" : ""}`} style={pct === null ? undefined : { width: `${pct}%` }} />
         </div>
-        <p className="mt-3 text-xs text-zinc-500">You can keep reading chats while this runs. Cancelling keeps everything imported so far.</p>
+        <p className="mt-3 text-xs text-zinc-500">Hide this window to keep reading chats while the import continues. Progress stays visible in the chat list.</p>
       </Modal>
     );
   }
@@ -39,7 +66,7 @@ export function ImportDialog({ state, onChange, onClose }: Props) {
     return (
       <Modal title={error ? "Import failed" : cancelled ? "Import cancelled" : "Import complete"} onClose={onClose} footer={<Button primary onClick={onClose}>Done</Button>}>
         {error && <p className="text-sm text-red-500">{error}</p>}
-        {cancelled && <p className="text-sm text-zinc-500">Everything imported before cancelling has been kept. Import the same backups again to finish.</p>}
+        {cancelled && <p className="text-sm text-zinc-500">Everything imported before stopping has been kept. Import the same backups again to finish; nothing will be duplicated.</p>}
         {report && (
           <div className="space-y-3 text-sm">
             <dl className="grid grid-cols-2 gap-2">
