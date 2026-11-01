@@ -113,6 +113,8 @@ pub struct ParseIssue {
     /// Index of the message block in the page.
     pub block: usize,
     pub message: String,
+    /// The block's HTML, kept so a later parser can try again.
+    pub html: String,
 }
 
 const TIMESTAMP_FORMAT: &str = "%b %d, %Y %I:%M %p";
@@ -133,7 +135,18 @@ pub fn parse_page(html: &str) -> ParsedPage {
     for (block, h2) in doc.select(&sel("main h2")).enumerate() {
         match parse_block(h2) {
             Ok(m) => messages.push(m),
-            Err(message) => issues.push(ParseIssue { block, message }),
+            Err(message) => {
+                let html = h2
+                    .parent()
+                    .and_then(ElementRef::wrap)
+                    .map(|el| el.html())
+                    .unwrap_or_default();
+                issues.push(ParseIssue {
+                    block,
+                    message,
+                    html,
+                });
+            }
         }
     }
 

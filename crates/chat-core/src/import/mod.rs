@@ -193,6 +193,7 @@ struct StoredRow {
     fp: Hash,
     occurrence: i64,
     sort_key: i64,
+    last_seen: Option<i64>,
 }
 
 struct MediaPlan {
@@ -324,6 +325,20 @@ impl Run<'_> {
             params![export_id, self.scan.vfs.file(page.file).path, size as i64, &hash[..], now()],
         )?;
         let source_file = tx.last_insert_rowid();
+        let logical_path = self.scan.vfs.file(page.file).path.clone();
+        tx.execute(
+            "DELETE FROM parse_failures WHERE thread_id = ?1 AND source_file_id IN (
+                 SELECT id FROM source_files WHERE logical_path = ?2
+             )",
+            params![ctx.id, logical_path],
+        )?;
+        for issue in &parsed.issues {
+            tx.execute(
+                "INSERT INTO parse_failures (thread_id, source_file_id, block_index, issue, raw_html)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![ctx.id, source_file, issue.block as i64, issue.message, issue.html],
+            )?;
+        }
         let new_before = self.report.messages_new;
         // Even when every day is skipped, a newer backup refreshes display names.
         for inc in &incoming {
@@ -405,7 +420,7 @@ impl Run<'_> {
         let mut existing: BTreeMap<i64, Vec<StoredRow>> = BTreeMap::new();
         {
             let mut stmt = tx.prepare_cached(
-                "SELECT id, ts_minute, fp, occurrence, sort_key FROM messages
+                "SELECT id, ts_minute, fp, occurrence, sort_key, last_seen_at FROM messages
                  WHERE thread_id = ?1 AND sort_key BETWEEN ?2 AND ?3 ORDER BY sort_key",
             )?;
             let rows = stmt.query_map(params![ctx.id, lo, hi], |r| {
@@ -415,6 +430,7 @@ impl Run<'_> {
                     fp: blob32(r.get::<_, Vec<u8>>(2)?),
                     occurrence: r.get(3)?,
                     sort_key: r.get(4)?,
+                    last_seen: r.get(5)?,
                 })
             })?;
             for row in rows {
@@ -467,7 +483,7 @@ impl Run<'_> {
             }
             for &(i, j) in &mm.matched {
                 let inc = &incoming[new_idxs[j]];
-                add_reactions(tx, ctx, ex[i].id, inc)?;
+                sync_reactions(tx, ctx, ex[i].id, inc, export_at, ex[i].last_seen)?;
                 if let Some(t) = export_at {
                     tx.prepare_cached("UPDATE messages SET last_seen_at = MAX(COALESCE(last_seen_at, 0), ?1) WHERE id = ?2")?
                         .execute(params![t, ex[i].id])?;
@@ -777,13 +793,15 @@ impl Run<'_> {
                 if !seen.insert(name.clone()) {
                     continue;
                 }
-                if let Some(id) = stmt
+                if let Some(&file) = self.scan.find_media(path).first() {
+                    // Stage even when a copy is already stored, so a different file
+                    // under the same export name replaces the old bytes.
+                    to_stage.push((name, file));
+                } else if let Some(id) = stmt
                     .query_row(params![thread, name], |r| r.get(0))
                     .optional()?
                 {
                     plan.known.insert(name, id);
-                } else if let Some(&file) = self.scan.find_media(path).first() {
-                    to_stage.push((name, file));
                 } else {
                     plan.missing.push(name);
                 }
@@ -990,6 +1008,48 @@ fn reaction_keys(inc: &Incoming) -> Vec<(String, String)> {
         .iter()
         .map(|(k, e, _)| (k.clone(), e.clone()))
         .collect()
+}
+
+/// Keeps the newest backup's reaction set: adds new ones and, when this backup is
+/// at least as new as the message's last sighting, drops ones it no longer has.
+fn sync_reactions(
+    tx: &Connection,
+    ctx: &mut ThreadCtx,
+    message: i64,
+    inc: &Incoming,
+    export_at: Option<i64>,
+    last_seen: Option<i64>,
+) -> Result<()> {
+    let newer = match (export_at, last_seen) {
+        (Some(t), Some(seen)) => t >= seen,
+        (Some(_), None) => true,
+        (None, _) => false,
+    };
+    if newer {
+        let keep: HashSet<(&str, &str)> = inc
+            .reactions
+            .iter()
+            .map(|(key, emoji, _)| (key.as_str(), emoji.as_str()))
+            .collect();
+        let rows: Vec<(i64, String, String)> = {
+            let mut stmt = tx.prepare_cached(
+                "SELECT r.participant_id, p.sender_key, r.emoji FROM reactions r
+                 JOIN participants p ON p.id = r.participant_id
+                 WHERE r.message_id = ?1",
+            )?;
+            let found = stmt.query_map([message], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            found.collect::<std::result::Result<_, _>>()?
+        };
+        for (pid, key, emoji) in rows {
+            if !keep.contains(&(key.as_str(), emoji.as_str())) {
+                tx.execute(
+                    "DELETE FROM reactions WHERE message_id = ?1 AND participant_id = ?2 AND emoji = ?3",
+                    params![message, pid, emoji],
+                )?;
+            }
+        }
+    }
+    add_reactions(tx, ctx, message, inc)
 }
 
 fn add_reactions(tx: &Connection, ctx: &mut ThreadCtx, message: i64, inc: &Incoming) -> Result<()> {

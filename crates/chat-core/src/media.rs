@@ -188,19 +188,23 @@ impl MediaStore {
                     "UPDATE media_refs SET media_id = ?1 WHERE thread_id = ?2 AND original_name = ?3",
                     params![media_id, thread_id, original_name],
                 )?;
-                if !is_present(conn, old)? {
-                    conn.execute(
-                        "UPDATE message_parts SET media_id = ?1 WHERE media_id = ?2",
-                        params![media_id, old],
-                    )?;
-                    let still_used: bool = conn.query_row(
-                        "SELECT EXISTS (SELECT 1 FROM media_refs WHERE media_id = ?1)",
-                        [old],
-                        |r| r.get(0),
-                    )?;
-                    if !still_used {
-                        conn.execute("DELETE FROM media WHERE id = ?1", [old])?;
-                    }
+                conn.execute(
+                    "UPDATE message_parts SET media_id = ?1
+                     WHERE media_id = ?2
+                       AND message_id IN (SELECT id FROM messages WHERE thread_id = ?3)",
+                    params![media_id, old, thread_id],
+                )?;
+                let still_used: bool = conn.query_row(
+                    "SELECT EXISTS (
+                         SELECT 1 FROM media_refs WHERE media_id = ?1
+                         UNION ALL
+                         SELECT 1 FROM message_parts WHERE media_id = ?1
+                     )",
+                    [old],
+                    |r| r.get(0),
+                )?;
+                if !still_used {
+                    conn.execute("DELETE FROM media WHERE id = ?1", [old])?;
                 }
             }
             None => {
@@ -263,17 +267,6 @@ fn ref_media_id(conn: &Connection, thread_id: i64, original_name: &str) -> Resul
             |r| r.get(0),
         )
         .optional()?)
-}
-
-fn is_present(conn: &Connection, id: MediaId) -> Result<bool> {
-    Ok(conn
-        .query_row(
-            "SELECT status = 'present' FROM media WHERE id = ?1",
-            [id],
-            |r| r.get(0),
-        )
-        .optional()?
-        .unwrap_or(false))
 }
 
 /// MIME type and file extension from magic bytes, falling back to the export's file

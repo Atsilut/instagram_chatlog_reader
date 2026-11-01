@@ -443,6 +443,65 @@ fn messages_missing_from_the_latest_complete_backup_are_kept_and_flagged() {
 }
 
 #[test]
+fn a_removed_reaction_does_not_stay() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut with_reaction = base_chat();
+    with_reaction[1] = with_reaction[1].clone().reacted("😂", "Joy");
+    let without = base_chat();
+    let a = write_export(tmp.path(), "2025-07-02", "Joy", &with_reaction, 100, &[]);
+    let b = write_export(tmp.path(), "2025-07-03", "Joy", &without, 100, &[]);
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[a]);
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM reactions"), 1);
+    run(&mut lib, &[b]);
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM reactions"), 0);
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM messages"), 6);
+}
+
+#[test]
+fn a_later_file_replaces_different_bytes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let chat = vec![m("Joy", "Jul 01, 2025 9:00 am", "").photo("1.jpg")];
+    let a = write_export(tmp.path(), "2025-07-02", "Joy", &chat, 100, &["1.jpg"]);
+    let b = write_export(tmp.path(), "2025-07-03", "Joy", &chat, 100, &["1.jpg"]);
+    let photo = b.join("your_instagram_activity/messages/inbox/joy_111/photos/1.jpg");
+    std::fs::write(&photo, b"replaced photo bytes").unwrap();
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[a]);
+    run(&mut lib, &[b]);
+    let stored: Vec<u8> = lib
+        .conn()
+        .query_row(
+            "SELECT m.blake3 FROM message_parts p JOIN media m ON m.id = p.media_id",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, blake3::hash(b"replaced photo bytes").as_bytes());
+}
+
+#[test]
+fn an_unparsed_block_is_kept_for_a_later_parser() {
+    let tmp = tempfile::tempdir().unwrap();
+    let msgs = vec![
+        m("Joy", "Jul 01, 2025 9:00 am", "kept message here"),
+        m(ME, "sometime yesterday", "dropped message here"),
+    ];
+    let export = write_export(tmp.path(), "2025-07-02", "Joy", &msgs, 100, &[]);
+    let mut lib = library(tmp.path());
+    let r = run(&mut lib, std::slice::from_ref(&export));
+    assert_eq!(r.parse_issues, 1);
+    assert_eq!(texts(&lib), vec!["kept message here"]);
+    let html: String = lib
+        .conn()
+        .query_row("SELECT raw_html FROM parse_failures", [], |r| r.get(0))
+        .unwrap();
+    assert!(html.contains("dropped message here"), "{html}");
+    run(&mut lib, &[export]);
+    assert_eq!(scalar(&lib, "SELECT COUNT(*) FROM parse_failures"), 1);
+}
+
+#[test]
 fn media_is_linked_and_missing_files_are_filled_in_later() {
     let tmp = tempfile::tempdir().unwrap();
     let chat = vec![

@@ -38,6 +38,7 @@ fn counts_and_issues() {
     assert_eq!(p.issues.len(), 1);
     assert_eq!(p.issues[0].block, 19);
     assert!(p.issues[0].message.contains("sometime"));
+    assert!(p.issues[0].html.contains("sometime"));
 }
 
 #[test]
