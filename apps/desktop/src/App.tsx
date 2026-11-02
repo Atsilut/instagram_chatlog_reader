@@ -4,11 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApi, type ThreadSummary } from "./api";
 import { ChatView } from "./components/ChatView";
 import { ImportDialog, type ImportState } from "./components/ImportDialog";
-import { Button } from "./components/Modal";
+import { Button, Modal } from "./components/Modal";
 import { PeopleDialog } from "./components/PeopleDialog";
 import { SearchPanel } from "./components/SearchPanel";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { Sidebar } from "./components/Sidebar";
+import { threadTitle } from "./lib/format";
 
 /** How often the chat list refreshes while an import is running. */
 const LIVE_REFRESH_MS = 3000;
@@ -27,7 +28,10 @@ export default function App() {
   /** Bumped when an import finishes so the open chat reloads its messages. */
   const [transcriptEpoch, setTranscriptEpoch] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ThreadSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const lastRefresh = useRef(0);
+  const deletingRef = useRef(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -56,7 +60,7 @@ export default function App() {
       await api.libraryInfo();
       const list = await api.listThreads();
       setThreads(list);
-      setSelected((s) => (s !== null && list.some((t) => t.id === s) ? s : (list[0]?.id ?? null)));
+      setSelected((s) => (s !== null && list.some((t) => t.id === s) ? s : (list.find((t) => !t.hidden)?.id ?? null)));
     } catch (e) {
       setError(String(e));
     }
@@ -96,6 +100,38 @@ export default function App() {
     setImportState((s) => (s?.phase === "running" ? s : null));
   };
   const thread = threads?.find((t) => t.id === selected) ?? null;
+  const searchThreads = threads?.filter((t) => !t.hidden || t.id === thread?.id) ?? [];
+
+  const setHidden = async (id: number, hidden: boolean) => {
+    try {
+      await api.setHidden(id, hidden);
+      setThreads((list) => list?.map((t) => (t.id === id ? { ...t, hidden } : t)) ?? null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const removeThread = async () => {
+    if (!pendingDelete || deletingRef.current) return;
+    const id = pendingDelete.id;
+    deletingRef.current = true;
+    setDeleting(true);
+    try {
+      await api.deleteThread(id);
+      setPendingDelete(null);
+      if (selected === id) {
+        setPeopleOpen(false);
+        setJump(null);
+      }
+      setThreads((list) => list?.filter((t) => t.id !== id) ?? null);
+      setSelected((s) => (s === id ? (threads?.find((t) => t.id !== id && !t.hidden)?.id ?? null) : s));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      deletingRef.current = false;
+      setDeleting(false);
+    }
+  };
 
   if (error) return <p className="p-8 text-red-500">{error}</p>;
   if (!threads) return <p className="p-8 text-zinc-500">Opening library...</p>;
@@ -112,6 +148,8 @@ export default function App() {
             onSelect={selectThread}
             onImport={openImport}
             onSettings={() => setSettingsOpen(true)}
+            onSetHidden={(id, hidden) => void setHidden(id, hidden)}
+            onDelete={setPendingDelete}
             importing={importState?.phase === "running" ? importState : null}
           />
           {thread ? (
@@ -126,13 +164,17 @@ export default function App() {
                 setSearchOpen(true);
               }}
               onLatest={() => setJump(null)}
+              onSetHidden={() => void setHidden(thread.id, !thread.hidden)}
+              onDelete={() => setPendingDelete(thread)}
             />
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">Chats appear here as they are imported.</div>
+            <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
+              {threads.some((t) => !t.hidden) ? "Select a chat." : "Hidden chats are under Hidden."}
+            </div>
           )}
           {searchOpen && (
             <SearchPanel
-              threads={threads}
+              threads={searchThreads}
               current={thread}
               allChats={searchAll || !thread}
               onOpen={openHit}
@@ -149,6 +191,26 @@ export default function App() {
           onSaved={(participants) => setThreads((list) => list?.map((t) => (t.id === thread.id ? { ...t, participants } : t)) ?? null)}
           onClose={() => setPeopleOpen(false)}
         />
+      )}
+      {pendingDelete && (
+        <Modal
+          title={`Delete ${threadTitle(pendingDelete)}?`}
+          onClose={() => setPendingDelete(null)}
+          footer={
+            <>
+              <Button onClick={() => setPendingDelete(null)} disabled={deleting}>
+                Cancel
+              </Button>
+              <Button danger onClick={() => void removeThread()} disabled={deleting}>
+                Delete
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            This removes the chat from this library. Importing a backup that contains it brings the chat back.
+          </p>
+        </Modal>
       )}
     </div>
   );

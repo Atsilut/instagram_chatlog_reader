@@ -50,9 +50,11 @@ interface Props {
   onSearch: () => void;
   /** Leaves a jumped-to position and shows the newest messages. */
   onLatest: () => void;
+  onSetHidden: () => void;
+  onDelete: () => void;
 }
 
-export function ChatView({ thread, target, jumpNonce, onPeople, onSearch, onLatest }: Props) {
+export function ChatView({ thread, target, jumpNonce, onPeople, onSearch, onLatest, onSetHidden, onDelete }: Props) {
   const api = useApi();
   useDisplaySettings();
   const [msgs, setMsgs] = useState<MessageView[]>([]);
@@ -158,6 +160,12 @@ export function ChatView({ thread, target, jumpNonce, onPeople, onSearch, onLate
         </button>
         <button className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" onClick={onPeople}>
           People
+        </button>
+        <button className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800" onClick={onSetHidden}>
+          {thread.hidden ? "Unhide" : "Hide"}
+        </button>
+        <button className="rounded-lg px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10" onClick={onDelete}>
+          Delete
         </button>
       </header>
 

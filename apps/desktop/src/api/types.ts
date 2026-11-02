@@ -29,6 +29,8 @@ export interface ThreadSummary {
   lastKind: string | null;
   lastParticipantId: number | null;
   participants: ParticipantInfo[];
+  /** Left out of the main list. Still in the library, and still searchable while open. */
+  hidden: boolean;
 }
 
 export interface MediaView {

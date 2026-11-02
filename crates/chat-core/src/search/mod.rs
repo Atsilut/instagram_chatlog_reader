@@ -73,6 +73,12 @@ impl Filters {
                 args.push(v);
             }
         }
+        // A search inside one chat still sees it when that chat is hidden.
+        if self.thread_id.is_none() {
+            cond.push_str(
+                " AND NOT EXISTS (SELECT 1 FROM threads t WHERE t.id = m.thread_id AND t.hidden != 0)",
+            );
+        }
         (cond, args)
     }
 }
@@ -256,8 +262,15 @@ impl SearchIndex {
         Ok(done)
     }
 
-    pub fn search(&self, q: &SearchQuery) -> Result<SearchResults> {
-        let Some(query) = self.build_query(&q.text, &q.filters, q.similar_words) else {
+    /// `exclude_threads` drops those chats from a library-wide search. It is ignored
+    /// when `q.filters.thread_id` is set, so an open hidden chat can still be searched.
+    pub fn search(&self, q: &SearchQuery, exclude_threads: &[i64]) -> Result<SearchResults> {
+        let exclude = if q.filters.thread_id.is_some() {
+            &[][..]
+        } else {
+            exclude_threads
+        };
+        let Some(query) = self.build_query(&q.text, &q.filters, q.similar_words, exclude) else {
             return Ok(SearchResults::default());
         };
         let searcher = self.reader.searcher();
@@ -283,11 +296,22 @@ impl SearchIndex {
         Ok(SearchResults { total, message_ids })
     }
 
+    /// Removes every indexed document for a chat. Call this after the chat row is gone.
+    pub fn remove_thread(&self, thread_id: i64) -> Result<()> {
+        let mut writer: IndexWriter = self.index.writer(WRITER_MEMORY)?;
+        writer.delete_term(Term::from_field_i64(self.f.thread_id, thread_id));
+        writer.commit()?;
+        writer.wait_merging_threads()?;
+        self.reader.reload()?;
+        Ok(())
+    }
+
     fn build_query(
         &self,
         text: &str,
         filters: &Filters,
         q_similar: bool,
+        exclude_threads: &[i64],
     ) -> Option<Box<dyn Query>> {
         let norm = normalize(text);
         let words: Vec<&str> = norm.split_whitespace().collect();
@@ -341,6 +365,15 @@ impl SearchIndex {
                 Box::new(RangeQuery::new(
                     bound(filters.from_minute),
                     bound(filters.to_minute),
+                )),
+            ));
+        }
+        for id in exclude_threads {
+            clauses.push((
+                Occur::MustNot,
+                Box::new(TermQuery::new(
+                    Term::from_field_i64(self.f.thread_id, *id),
+                    IndexRecordOption::Basic,
                 )),
             ));
         }

@@ -30,6 +30,10 @@ export interface ApiClient {
   loadMessages(threadId: number, window: MessageWindow, limit: number): Promise<MessageView[]>;
   /** Returns the thread's participants after the change. */
   setAlias(participantId: number, alias: string | null): Promise<ParticipantInfo[]>;
+  /** Hides a chat from the main list, or shows it again. The messages stay. */
+  setHidden(threadId: number, hidden: boolean): Promise<void>;
+  /** Removes the chat from this library. A later import that contains it brings it back. */
+  deleteThread(threadId: number): Promise<void>;
 
   /** Lets the user choose ZIP files or one folder; resolves to [] when cancelled. */
   pickImportSources(kind: "zip" | "folder"): Promise<string[]>;

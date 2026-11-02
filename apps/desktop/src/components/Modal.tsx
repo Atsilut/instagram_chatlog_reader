@@ -45,16 +45,20 @@ export function Button({
   children,
   onClick,
   primary,
+  danger,
   disabled,
 }: {
   children: ReactNode;
   onClick?: () => void;
   primary?: boolean;
+  danger?: boolean;
   disabled?: boolean;
 }) {
-  const style = primary
-    ? "bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-600/40"
-    : "bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40";
+  const style = danger
+    ? "bg-red-600 text-white hover:bg-red-500 disabled:bg-red-600/40"
+    : primary
+      ? "bg-indigo-600 text-white hover:bg-indigo-500 disabled:bg-indigo-600/40"
+      : "bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40";
   return (
     <button className={`rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${style}`} onClick={onClick} disabled={disabled}>
       {children}

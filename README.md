@@ -30,6 +30,7 @@ This app does **not** connect to Instagram or Meta. It reads only the files prod
 - **Fast, typo-tolerant search:** matches the exact word, ignoring capitals and accents. Spaces are ignored for phrases of up to four words ("goodmorning" finds "good morning"). "Include similar words" also matches English verb forms (searching "love" finds "loved") and one-key typos ("kove", "lovef"), including a slip on a Korean keyboard. A Korean word also matches a longer word that starts with it, so a particle still matches. Deep search scans every message: "love" finds "lovely" because the letters occur together, and it also finds heavier typos. Jump from any result straight to that message.
 - **Media:** photos, videos, voice messages, GIFs, and files are stored once (deduplicated by content) and shown inline.
 - **Rename people:** override any participant's display name.
+- **Hide or delete a chat:** hiding keeps the chat in the library and off the main list. Deleting removes it until you import a backup that contains it again.
 - **Fully local and private:** all data stays on your machine.
 
 ## Tech stack

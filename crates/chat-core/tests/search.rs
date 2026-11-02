@@ -53,7 +53,7 @@ fn texts_of(lib: &Library, ids: &[i64]) -> Vec<String> {
 }
 
 fn texts(lib: &Library, index: &SearchIndex, q: SearchQuery) -> Vec<String> {
-    texts_of(lib, &index.search(&q).unwrap().message_ids)
+    texts_of(lib, &index.search(&q, &[]).unwrap().message_ids)
 }
 
 fn q(text: &str) -> SearchQuery {
@@ -270,10 +270,10 @@ fn reports_total_beyond_the_page() {
     let (_lib, index) = setup(tmp.path());
     let mut first = q("japanese");
     first.limit = 1;
-    let r = index.search(&first).unwrap();
+    let r = index.search(&first, &[]).unwrap();
     assert_eq!((r.total, r.message_ids.len()), (2, 1));
     first.offset = 1;
-    assert_eq!(index.search(&first).unwrap().message_ids.len(), 1);
+    assert_eq!(index.search(&first, &[]).unwrap().message_ids.len(), 1);
 }
 
 #[test]
@@ -440,7 +440,7 @@ fn bench_large_library() {
         "weird coffee tomorrow",
     ] {
         let start = std::time::Instant::now();
-        let r = index.search(&q(text)).unwrap();
+        let r = index.search(&q(text), &[]).unwrap();
         eprintln!(
             "{text:>22}: {:>8} hits, first page in {:.1?}",
             r.total,
@@ -450,6 +450,72 @@ fn bench_large_library() {
     let start = std::time::Instant::now();
     let found = deep(&lib, "japnese studdy").len();
     eprintln!("deep search: {found} matches in {:.1?}", start.elapsed());
+}
+
+#[test]
+fn hidden_chat_is_left_out_of_searches_across_chats() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    let joy = query::threads(lib.conn())
+        .unwrap()
+        .into_iter()
+        .find(|t| t.title == "Joy")
+        .unwrap();
+    query::set_hidden(lib.conn(), joy.id, true).unwrap();
+    let exclude = query::hidden_thread_ids(lib.conn()).unwrap();
+
+    let across = texts_of(
+        &lib,
+        &index.search(&q("japanese"), &exclude).unwrap().message_ids,
+    );
+    assert_eq!(across, vec!["japanese class tomorrow"]);
+
+    let mut within = q("japanese");
+    within.filters.thread_id = Some(joy.id);
+    let inside = texts_of(&lib, &index.search(&within, &exclude).unwrap().message_ids);
+    assert!(inside.iter().any(|t| t.contains("studying")));
+
+    let wide = texts_of(
+        &lib,
+        &deep(&lib, "japanese")
+            .into_iter()
+            .map(|h| h.message_id)
+            .collect::<Vec<_>>(),
+    );
+    assert!(wide.iter().all(|t| !t.contains("studying")));
+    assert!(wide.iter().any(|t| t.contains("class")));
+
+    let mut only = Filters::default();
+    only.thread_id = Some(joy.id);
+    let mut hits = Vec::new();
+    deep_search(
+        lib.conn(),
+        "japanese",
+        &only,
+        None,
+        None,
+        &mut |h| hits.extend(h),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert!(!hits.is_empty());
+}
+
+#[test]
+fn deleting_a_chat_removes_its_search_hits() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (lib, index) = setup(tmp.path());
+    let joy = query::threads(lib.conn())
+        .unwrap()
+        .into_iter()
+        .find(|t| t.title == "Joy")
+        .unwrap();
+    lib.delete_thread(&index, joy.id).unwrap();
+    let left = texts_of(
+        &lib,
+        &index.search(&q("japanese"), &[]).unwrap().message_ids,
+    );
+    assert_eq!(left, vec!["japanese class tomorrow"]);
 }
 
 #[test]

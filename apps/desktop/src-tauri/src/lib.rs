@@ -169,13 +169,26 @@ async fn set_alias(
 }
 
 #[tauri::command]
+async fn set_hidden(state: State<'_, AppState>, thread_id: i64, hidden: bool) -> CmdResult<()> {
+    let lib = state.library.lock().map_err(err)?;
+    query::set_hidden(lib.conn(), thread_id, hidden).map_err(err)
+}
+
+#[tauri::command]
+async fn delete_thread(state: State<'_, AppState>, thread_id: i64) -> CmdResult<()> {
+    let lib = state.library.lock().map_err(err)?;
+    lib.delete_thread(&state.search, thread_id).map_err(err)
+}
+
+#[tauri::command]
 async fn search(state: State<'_, AppState>, query: SearchQuery) -> CmdResult<SearchResponse> {
     let query = SearchQuery {
         limit: query.limit.clamp(1, MAX_PAGE),
         ..query
     };
-    let results = state.search.search(&query).map_err(err)?;
     let lib = state.library.lock().map_err(err)?;
+    let exclude = query::hidden_thread_ids(lib.conn()).map_err(err)?;
+    let results = state.search.search(&query, &exclude).map_err(err)?;
     Ok(SearchResponse {
         total: results.total,
         hits: query::messages_by_ids(lib.conn(), &results.message_ids).map_err(err)?,
@@ -434,6 +447,8 @@ pub fn run() {
             list_threads,
             load_messages,
             set_alias,
+            set_hidden,
+            delete_thread,
             search,
             deep_page,
             index_status,

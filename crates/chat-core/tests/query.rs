@@ -3,6 +3,7 @@
 mod common;
 
 use chat_core::query::{self, Window};
+use chat_core::search::SearchIndex;
 use common::{library, m, run, write_chat, M, ME};
 
 fn day_chat(prefix: &str, count: usize) -> Vec<M> {
@@ -258,4 +259,167 @@ fn aliases_can_be_set_and_cleared() {
     query::set_alias(lib.conn(), joy.id, Some("   ")).unwrap();
     let p = query::participants(lib.conn(), joy.thread_id).unwrap();
     assert_eq!(p.iter().find(|x| x.id == joy.id).unwrap().alias, None);
+}
+
+#[test]
+fn hiding_a_chat_keeps_its_messages_and_can_be_undone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "joy_111",
+        "Joy",
+        &[m("Joy", "Jul 01, 2025 9:00 am", "still here")],
+        10,
+        &[],
+    );
+    write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "amy_222",
+        "Amy",
+        &[m("Amy", "Jul 02, 2025 9:00 am", "visible")],
+        10,
+        &[],
+    );
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[export]);
+
+    let threads = query::threads(lib.conn()).unwrap();
+    assert!(threads.iter().all(|t| !t.hidden));
+    let joy = threads.iter().find(|t| t.title == "Joy").unwrap().id;
+    query::set_hidden(lib.conn(), joy, true).unwrap();
+
+    let threads = query::threads(lib.conn()).unwrap();
+    assert_eq!(threads.len(), 2);
+    assert!(threads.iter().find(|t| t.id == joy).unwrap().hidden);
+    assert!(!threads.iter().find(|t| t.title == "Amy").unwrap().hidden);
+    assert_eq!(
+        texts(&query::messages(lib.conn(), joy, Window::Latest, 10).unwrap()),
+        vec!["still here"]
+    );
+    assert_eq!(query::hidden_thread_ids(lib.conn()).unwrap(), vec![joy]);
+
+    query::set_hidden(lib.conn(), joy, false).unwrap();
+    assert!(!query::threads(lib.conn()).unwrap().iter().any(|t| t.hidden));
+    assert!(query::hidden_thread_ids(lib.conn()).unwrap().is_empty());
+}
+
+#[test]
+fn delete_drops_exclusive_media_and_keeps_a_shared_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let joy = vec![
+        m("Joy", "Jul 01, 2025 9:00 am", "only mine").photo("joy-only.jpg"),
+        m("Joy", "Jul 01, 2025 9:01 am", "ours").photo("shared.jpg"),
+    ];
+    let amy = vec![
+        m("Amy", "Jul 02, 2025 9:00 am", "only amy").photo("amy-only.jpg"),
+        m("Amy", "Jul 02, 2025 9:01 am", "ours too").photo("shared.jpg"),
+    ];
+    write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "joy_111",
+        "Joy",
+        &joy,
+        10,
+        &["joy-only.jpg", "shared.jpg"],
+    );
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "amy_222",
+        "Amy",
+        &amy,
+        10,
+        &["amy-only.jpg", "shared.jpg"],
+    );
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[export]);
+    let index = SearchIndex::open(&lib.root().join("search_index"), lib.conn()).unwrap();
+    index.sync(lib.conn(), None, &mut |_| {}).unwrap();
+
+    let joy_id = query::threads(lib.conn())
+        .unwrap()
+        .into_iter()
+        .find(|t| t.title == "Joy")
+        .unwrap()
+        .id;
+    lib.conn()
+        .execute(
+            "INSERT OR IGNORE INTO index_queue (message_id) SELECT id FROM messages WHERE thread_id = ?1",
+            [joy_id],
+        )
+        .unwrap();
+
+    lib.delete_thread(&index, joy_id).unwrap();
+
+    let titles: Vec<String> = query::threads(lib.conn())
+        .unwrap()
+        .into_iter()
+        .map(|t| t.title)
+        .collect();
+    assert_eq!(titles, vec!["Amy"]);
+    assert!(query::messages(lib.conn(), joy_id, Window::Latest, 10)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        scalar_count(lib.conn(), "SELECT COUNT(*) FROM index_queue"),
+        0
+    );
+    let bodies = media_bodies(&lib);
+    assert_eq!(bodies.len(), 2);
+    assert!(!bodies.iter().any(|b| b == b"photo bytes joy-only.jpg"));
+    assert!(bodies.iter().any(|b| b == b"photo bytes shared.jpg"));
+    assert!(bodies.iter().any(|b| b == b"photo bytes amy-only.jpg"));
+}
+
+#[test]
+fn importing_again_restores_a_deleted_chat() {
+    let tmp = tempfile::tempdir().unwrap();
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "joy_111",
+        "Joy",
+        &[m("Joy", "Jul 01, 2025 9:00 am", "hello again")],
+        10,
+        &[],
+    );
+    let mut lib = library(tmp.path());
+    run(&mut lib, std::slice::from_ref(&export));
+    let id = query::threads(lib.conn()).unwrap()[0].id;
+    let index = SearchIndex::open(&lib.root().join("search_index"), lib.conn()).unwrap();
+    lib.delete_thread(&index, id).unwrap();
+    assert!(query::threads(lib.conn()).unwrap().is_empty());
+
+    run(&mut lib, &[export]);
+    let threads = query::threads(lib.conn()).unwrap();
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].title, "Joy");
+    assert!(!threads[0].hidden);
+    assert_eq!(
+        texts(&query::messages(lib.conn(), threads[0].id, Window::Latest, 10).unwrap()),
+        vec!["hello again"]
+    );
+}
+
+fn scalar_count(conn: &rusqlite::Connection, sql: &str) -> i64 {
+    conn.query_row(sql, [], |r| r.get(0)).unwrap()
+}
+
+fn media_bodies(lib: &chat_core::Library) -> Vec<Vec<u8>> {
+    let mut stmt = lib
+        .conn()
+        .prepare("SELECT store_path FROM media WHERE store_path IS NOT NULL ORDER BY store_path")
+        .unwrap();
+    stmt.query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|path| {
+            let path = path.unwrap();
+            let full = lib.root().join(&path);
+            assert!(full.is_file(), "missing stored file {path}");
+            std::fs::read(full).unwrap()
+        })
+        .collect()
 }

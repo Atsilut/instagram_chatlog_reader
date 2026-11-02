@@ -45,6 +45,14 @@ export class TauriClient implements ApiClient {
     return invoke("set_alias", { participantId, alias });
   }
 
+  setHidden(threadId: number, hidden: boolean): Promise<void> {
+    return invoke("set_hidden", { threadId, hidden });
+  }
+
+  deleteThread(threadId: number): Promise<void> {
+    return invoke("delete_thread", { threadId });
+  }
+
   async pickImportSources(kind: "zip" | "folder"): Promise<string[]> {
     const picked =
       kind === "zip"

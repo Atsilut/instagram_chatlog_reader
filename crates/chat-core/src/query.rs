@@ -34,6 +34,8 @@ pub struct ThreadSummary {
     pub last_kind: Option<String>,
     pub last_participant_id: Option<i64>,
     pub participants: Vec<ParticipantInfo>,
+    /// Left out of the main chat list and of searches that are not limited to this chat.
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -97,7 +99,7 @@ pub enum Window {
 pub fn threads(conn: &Connection) -> Result<Vec<ThreadSummary>> {
     let participants = all_participants(conn)?;
     let mut stmt = conn.prepare(
-        "SELECT t.id, t.title, t.kind, t.message_count, t.last_sort_key, m.text, m.kind, m.participant_id
+        "SELECT t.id, t.title, t.kind, t.message_count, t.last_sort_key, m.text, m.kind, m.participant_id, t.hidden
          FROM threads t
          LEFT JOIN messages m ON m.thread_id = t.id AND m.sort_key = t.last_sort_key
          ORDER BY t.last_sort_key DESC NULLS LAST, t.id",
@@ -112,6 +114,7 @@ pub fn threads(conn: &Connection) -> Result<Vec<ThreadSummary>> {
             last_text: r.get(5)?,
             last_kind: r.get(6)?,
             last_participant_id: r.get(7)?,
+            hidden: r.get(8)?,
             participants: Vec::new(),
         })
     })?;
@@ -151,6 +154,27 @@ fn all_participants(conn: &Connection) -> Result<HashMap<i64, Vec<ParticipantInf
         map.entry(p.thread_id).or_default().push(p);
     }
     Ok(map)
+}
+
+/// Hides or shows a chat. Hidden chats stay in [`threads`] and can still be opened.
+pub fn set_hidden(conn: &Connection, thread: i64, hidden: bool) -> Result<()> {
+    let updated = conn.execute(
+        "UPDATE threads SET hidden = ?1 WHERE id = ?2",
+        params![hidden, thread],
+    )?;
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows.into());
+    }
+    Ok(())
+}
+
+/// Ids of chats left out of library-wide search.
+pub fn hidden_thread_ids(conn: &Connection) -> Result<Vec<i64>> {
+    let mut stmt = conn.prepare("SELECT id FROM threads WHERE hidden != 0 ORDER BY id")?;
+    let ids = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(ids)
 }
 
 /// Sets or clears (`None` or blank) a participant's display alias.
