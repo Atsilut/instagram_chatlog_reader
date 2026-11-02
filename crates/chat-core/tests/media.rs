@@ -160,6 +160,36 @@ fn link_creates_ref_and_is_idempotent() {
     );
 }
 
+/// One Instagram page can reference more photos than macOS will let a process
+/// keep open (the soft limit is often 256). Staging must not hold a descriptor
+/// per file while the rest of the page is still being hashed.
+#[cfg(unix)]
+#[test]
+fn staged_files_do_not_keep_descriptors_open() {
+    let (_d, lib) = library();
+    let media = lib.media();
+    let before = open_fd_count();
+    let mut held = Vec::new();
+    for i in 0..64 {
+        let name = format!("photos/{i}");
+        held.push(media.stage(&mut &b"photo"[..], &name).unwrap());
+    }
+    // `held` stays alive so a descriptor kept per staged file is still open here.
+    let opened = open_fd_count().saturating_sub(before);
+    assert!(
+        opened < 8,
+        "holding {} staged files opened {opened} descriptors",
+        held.len()
+    );
+    let id = media.commit(lib.conn(), held.pop().unwrap()).unwrap();
+    assert!(media.info(lib.conn(), id).unwrap().unwrap().present);
+}
+
+#[cfg(unix)]
+fn open_fd_count() -> usize {
+    std::fs::read_dir("/dev/fd").unwrap().count()
+}
+
 #[test]
 fn interrupted_staging_is_cleaned_on_open() {
     let dir = tempfile::tempdir().unwrap();
