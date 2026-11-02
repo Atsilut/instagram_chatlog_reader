@@ -1,5 +1,6 @@
-# Builds unsigned Linux packages for testing. This workflow does not create a
-# tag or a GitHub Release. Publish from the release branch after testing.
+# Builds unsigned Linux packages. This workflow does not create a tag or a
+# GitHub Release. Publish release attaches these packages after the Windows
+# and macOS builds have finished.
 name: Linux build
 
 on:
