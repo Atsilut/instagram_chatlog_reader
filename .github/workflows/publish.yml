@@ -73,6 +73,8 @@ jobs:
 
             The packages come from the latest successful builds on `release/windows`, `release/mac`, and `release/linux`.
 
+            The macOS Intel and Linux packages have not been tested locally.
+
             ### Windows
             Run the `*-setup.exe` installer. It installs for the current user and is signed with the self-signed certificate `Atsilut.cer` (CN=Atsilut) from this same release. Windows SmartScreen warns until that certificate is trusted.
 
