@@ -1,0 +1,97 @@
+# Builds the Windows installer. This workflow does not create a tag or a
+# GitHub Release. Publish release attaches this package after the macOS and
+# Linux builds have finished.
+name: Windows build
+
+on:
+  push:
+    branches:
+      - release/windows
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@1.96
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Create self-signed code signing certificate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=Atsilut" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -HashAlgorithm SHA256 `
+            -KeyAlgorithm RSA `
+            -KeyLength 3072 `
+            -NotAfter (Get-Date).AddYears(5)
+          if (-not $cert) { throw "Failed to create code signing certificate" }
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          Export-Certificate -Cert $cert -FilePath certificate/Atsilut.cer | Out-Null
+          "CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+          Write-Host "Created code signing certificate $($cert.Thumbprint)"
+
+      - name: Build Windows installer
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:CERT_THUMBPRINT) { throw "CERT_THUMBPRINT is empty" }
+          @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $env:CERT_THUMBPRINT
+                digestAlgorithm = "sha256"
+                timestampUrl = "http://timestamp.digicert.com"
+                tsp = $true
+              }
+            }
+          } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM -Path signing.conf.json
+          npm run tauri -- build --bundles nsis --config signing.conf.json
+
+      - name: Verify signature
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path certificate/Atsilut.cer)) { throw "certificate/Atsilut.cer not found" }
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+          $setups = @(Get-ChildItem -Path "target/release/bundle/nsis" -Filter "*-setup.exe")
+          if ($setups.Count -eq 0) { throw "NSIS setup exe not found" }
+          foreach ($setup in $setups) {
+            $sig = Get-AuthenticodeSignature -FilePath $setup.FullName
+            $subject = $sig.SignerCertificate.Subject
+            Write-Host "$($setup.Name) status=$($sig.Status) message=$($sig.StatusMessage) signer=$subject"
+            if ($sig.Status -ne 'Valid' -or -not $subject -or $subject -notlike "*Atsilut*") {
+              throw "Setup exe signature is not valid for Atsilut (status: $($sig.Status); message: $($sig.StatusMessage); subject: $subject)"
+            }
+          }
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-chat-viewer-windows
+          if-no-files-found: error
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            certificate/Atsilut.cer
