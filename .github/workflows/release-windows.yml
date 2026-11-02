@@ -72,14 +72,17 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path certificate/Atsilut.cer)) { throw "certificate/Atsilut.cer not found" }
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
           $setups = @(Get-ChildItem -Path "target/release/bundle/nsis" -Filter "*-setup.exe")
           if ($setups.Count -eq 0) { throw "NSIS setup exe not found" }
           foreach ($setup in $setups) {
             $sig = Get-AuthenticodeSignature -FilePath $setup.FullName
             $subject = $sig.SignerCertificate.Subject
-            Write-Host "$($setup.Name) status=$($sig.Status) signer=$subject"
-            if (-not $subject -or $subject -notlike "*Atsilut*") {
-              throw "Setup exe signer does not contain Atsilut (status: $($sig.Status); subject: $subject)"
+            Write-Host "$($setup.Name) status=$($sig.Status) message=$($sig.StatusMessage) signer=$subject"
+            if ($sig.Status -ne 'Valid' -or -not $subject -or $subject -notlike "*Atsilut*") {
+              throw "Setup exe signature is not valid for Atsilut (status: $($sig.Status); message: $($sig.StatusMessage); subject: $subject)"
             }
           }
 
