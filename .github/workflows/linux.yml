@@ -1,5 +1,5 @@
 # Builds unsigned Linux packages for testing. This workflow does not create a
-# tag or a GitHub Release. Publish only after testing and a merge to main.
+# tag or a GitHub Release. Publish from the release branch after testing.
 name: Linux build
 
 on:
