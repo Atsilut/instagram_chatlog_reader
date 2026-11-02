@@ -54,7 +54,7 @@ jobs:
           test "$(find release -name '*-setup.exe' | wc -l)" -eq 1
           test "$(find release -name '*.cer' | wc -l)" -eq 1
           test "$(find release -name '*aarch64.dmg' | wc -l)" -eq 1
-          test "$(find release -name '*_x64.dmg' | wc -l)" -eq 1
+          test "$(find release \( -name '*_x64.dmg' -o -name '*x86_64.dmg' \) | wc -l)" -eq 1
           test "$(find release -name '*.deb' | wc -l)" -eq 1
           test "$(find release -name '*.AppImage' | wc -l)" -eq 1
 
