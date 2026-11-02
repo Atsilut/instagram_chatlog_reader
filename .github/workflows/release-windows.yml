@@ -3,7 +3,7 @@ name: Windows release
 on:
   push:
     branches:
-      - release/Windows
+      - release/windows
     tags:
       - "v*"
   workflow_dispatch:
