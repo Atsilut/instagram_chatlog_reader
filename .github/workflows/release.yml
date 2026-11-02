@@ -1,0 +1,267 @@
+# Builds the installers and publishes one GitHub Release.
+# Push a tag such as v1.0.0 to run it.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+
+      - uses: dtolnay/rust-toolchain@1.96
+        with:
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  build:
+    name: ${{ matrix.name }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: ""
+          - name: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            os: macos-latest
+            target: x86_64-apple-darwin
+          - name: linux-x64
+            os: ubuntu-22.04
+            target: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2
+
+      - uses: dtolnay/rust-toolchain@1.96
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Create self-signed code signing certificate
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=Atsilut" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -HashAlgorithm SHA256 `
+            -KeyAlgorithm RSA `
+            -KeyLength 3072 `
+            -NotAfter (Get-Date).AddYears(5)
+          if (-not $cert) { throw "Failed to create code signing certificate" }
+          New-Item -ItemType Directory -Force -Path certificate | Out-Null
+          Export-Certificate -Cert $cert -FilePath certificate/Atsilut.cer | Out-Null
+          "CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+          Write-Host "Created code signing certificate $($cert.Thumbprint)"
+
+      - name: Build Windows installer
+        if: matrix.name == 'windows-x64'
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:CERT_THUMBPRINT) { throw "CERT_THUMBPRINT is empty" }
+          @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $env:CERT_THUMBPRINT
+                digestAlgorithm = "sha256"
+                timestampUrl = "http://timestamp.digicert.com"
+                tsp = $true
+              }
+            }
+          } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8NoBOM -Path signing.conf.json
+          npm run tauri -- build --ci --bundles nsis --config signing.conf.json
+
+      - name: Verify Windows signature
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path certificate/Atsilut.cer)) { throw "certificate/Atsilut.cer not found" }
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+          Import-Certificate -FilePath certificate/Atsilut.cer -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+          $setups = @(Get-ChildItem -Path "target/release/bundle/nsis" -Filter "*-setup.exe")
+          if ($setups.Count -eq 0) { throw "NSIS setup exe not found" }
+          foreach ($setup in $setups) {
+            $sig = Get-AuthenticodeSignature -FilePath $setup.FullName
+            $subject = $sig.SignerCertificate.Subject
+            Write-Host "$($setup.Name) status=$($sig.Status) message=$($sig.StatusMessage) signer=$subject"
+            if ($sig.Status -ne 'Valid' -or -not $subject -or $subject -notlike "*Atsilut*") {
+              throw "Setup exe signature is not valid for Atsilut (status: $($sig.Status); message: $($sig.StatusMessage); subject: $subject)"
+            }
+          }
+
+      - name: Build macOS disk image
+        if: startsWith(matrix.name, 'macos-')
+        working-directory: apps/desktop
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri build -- --ci --bundles dmg --target ${{ matrix.target }}
+
+      - name: Build Linux packages
+        if: matrix.name == 'linux-x64'
+        working-directory: apps/desktop
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: npm run tauri build -- --ci --bundles deb,appimage
+
+      - name: Upload Windows installer
+        if: matrix.name == 'windows-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-chat-viewer-windows-x64
+          if-no-files-found: error
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            certificate/Atsilut.cer
+
+      - name: Upload macOS disk image
+        if: startsWith(matrix.name, 'macos-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-chat-viewer-${{ matrix.name }}
+          if-no-files-found: error
+          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+
+      - name: Upload Linux packages
+        if: matrix.name == 'linux-x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-chat-viewer-linux-x64
+          if-no-files-found: error
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: instagram-chat-viewer-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check release files
+        run: |
+          set -euo pipefail
+          find dist -type f -print
+          test "$(find dist -name '*-setup.exe' | wc -l)" -eq 1
+          test "$(find dist -name '*.cer' | wc -l)" -eq 1
+          test "$(find dist -name '*aarch64.dmg' | wc -l)" -eq 1
+          test "$(find dist -name '*_x64.dmg' | wc -l)" -eq 1
+          test "$(find dist -name '*.deb' | wc -l)" -eq 1
+          test "$(find dist -name '*.AppImage' | wc -l)" -eq 1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Instagram Chat Viewer ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*
+          body: |
+            Instagram Chat Viewer ${{ github.ref_name }} reads a local Instagram HTML export on your computer.
+
+            ### Windows
+            Run the `*-setup.exe` installer. It installs for the current user and is signed with the self-signed certificate `Atsilut.cer` (CN=Atsilut) from this same release. Windows SmartScreen warns until that certificate is trusted.
+
+            ### macOS
+            - Apple Silicon: the `aarch64` disk image
+            - Intel: the `x64` disk image
+
+            The app is ad-hoc signed. On first launch, Control-click the app and choose Open.
+
+            ### Linux (x86_64)
+            - `.deb` for Debian and Ubuntu
+            - `.AppImage` for other distributions. Install `libfuse2` where the system requires FUSE 2, or start it with `APPIMAGE_EXTRACT_AND_RUN=1`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
