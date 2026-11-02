@@ -1,0 +1,89 @@
+# Attaches the finished Windows, macOS, and Linux packages to one GitHub Release.
+# Run this after each release branch has a successful build. It does not build
+# those packages itself.
+name: Publish release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, such as v1.0.0
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download finished packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must look like v1.0.0"
+            exit 1
+          fi
+
+          download() {
+            local workflow="$1"
+            local branch="$2"
+            local id
+            id="$(gh run list --workflow "$workflow" --branch "$branch" --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+            if [[ -z "$id" || "$id" == "null" ]]; then
+              echo "No successful $workflow run on $branch"
+              exit 1
+            fi
+            echo "Using $workflow on $branch run $id"
+            gh run download "$id" --dir "dist/$branch"
+          }
+
+          download linux.yml release/linux
+          download release-windows.yml release/windows
+          download macos.yml release/mac
+
+          mkdir -p release
+          find dist -type f \( -name '*-setup.exe' -o -name '*.cer' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) -exec cp {} release/ \;
+          find release -type f -print
+          test "$(find release -name '*-setup.exe' | wc -l)" -eq 1
+          test "$(find release -name '*.cer' | wc -l)" -eq 1
+          test "$(find release -name '*aarch64.dmg' | wc -l)" -eq 1
+          test "$(find release \( -name '*_x64.dmg' -o -name '*x86_64.dmg' \) | wc -l)" -eq 1
+          test "$(find release -name '*.deb' | wc -l)" -eq 1
+          test "$(find release -name '*.AppImage' | wc -l)" -eq 1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Instagram Chat Viewer ${{ inputs.tag }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: release/*
+          body: |
+            Instagram Chat Viewer ${{ inputs.tag }} reads a local Instagram HTML export on your computer.
+
+            The packages come from the latest successful builds on `release/windows`, `release/mac`, and `release/linux`.
+
+            ### Windows
+            Run the `*-setup.exe` installer. It installs for the current user and is signed with the self-signed certificate `Atsilut.cer` (CN=Atsilut) from this same release. Windows SmartScreen warns until that certificate is trusted.
+
+            ### macOS
+            - Apple Silicon: the `aarch64` disk image
+            - Intel: the `x64` disk image
+
+            The app is ad-hoc signed. On first launch, Control-click the app and choose Open.
+
+            ### Linux (x86_64)
+            - `.deb` for Debian and Ubuntu
+            - `.AppImage` for other distributions. Install `libfuse2` where the system requires FUSE 2, or start it with `APPIMAGE_EXTRACT_AND_RUN=1`.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
