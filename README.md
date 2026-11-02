@@ -27,9 +27,10 @@ This app does **not** connect to Instagram or Meta. It reads only the files prod
 
 - **Import anything:** single or multiple ZIP files or folders, at any level: whole `meta-*` wrappers, `instagram-*` exports, single chat folders, or individual `message_N.html` files. Nested ZIPs are supported.
 - **Merge overlapping backups:** import manual and periodic (daily, weekly, monthly, annual) backups in any order. Messages are stored once, real repeats are preserved, and nothing is deleted even if it is missing from a newer backup.
-- **Fast, typo-tolerant search:** full-text and fuzzy search over millions of messages, including Korean and other CJK text, with an optional exhaustive "deep search". Jump from any result straight to that message in its conversation.
+- **Fast, typo-tolerant search:** matches the exact word, ignoring capitals and accents. Spaces are ignored for phrases of up to four words ("goodmorning" finds "good morning"). "Include similar words" also matches English verb forms (searching "love" finds "loved") and one-key typos ("kove", "lovef"), including a slip on a Korean keyboard. A Korean word also matches a longer word that starts with it, so a particle still matches. Deep search scans every message: "love" finds "lovely" because the letters occur together, and it also finds heavier typos. Jump from any result straight to that message.
 - **Media:** photos, videos, voice messages, GIFs, and files are stored once (deduplicated by content) and shown inline.
 - **Rename people:** override any participant's display name.
+- **Hide or delete a chat:** hiding keeps the chat in the library and off the main list. Deleting removes it until you import a backup that contains it again.
 - **Fully local and private:** all data stays on your machine.
 
 ## Tech stack
@@ -42,7 +43,57 @@ This app does **not** connect to Instagram or Meta. It reads only the files prod
 
 Example exports for local testing go in `examples/`. That folder is git-ignored. **Never commit real chat data.** Automated tests use synthetic fixtures. An optional real-data test reads from the path in the `ICV_SAMPLE_DIR` environment variable.
 
-Build and run instructions will be added once the project is scaffolded.
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (the toolchain version is pinned in `rust-toolchain.toml` and installed automatically by rustup)
+- [Node.js](https://nodejs.org/) 20 or newer
+- Tauri system dependencies for your OS: see [Tauri prerequisites](https://tauri.app/start/prerequisites/). WebView2 is preinstalled on Windows 10/11.
+
+### Run
+
+```sh
+cd apps/desktop
+npm install
+npm run tauri dev
+```
+
+The app creates its library (database, media, search index) in the OS app-data folder, for example `%APPDATA%\com.atsilut.instagramchatviewer\library` on Windows. To try things without touching that library, point the app at a scratch folder:
+
+```powershell
+$env:ICV_LIBRARY_DIR = "C:\temp\icv-lib"; npm run tauri dev
+```
+
+### Test
+
+```sh
+cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+
+# inspect how one exported page is parsed (summary, or full JSON with --json)
+cargo run -p chat-core --release --bin icv-parse -- path/to/message_1.html
+
+# list the exports and chats found in any mix of folders and ZIPs (reads names only)
+cargo run -p chat-core --release --bin icv-scan -- path/to/backup.zip path/to/folder
+
+# store all chat media from the inputs into a scratch library and report dedup/types
+cargo run -p chat-core --release --bin icv-media -- --library path/to/scratch-library path/to/backup.zip
+
+# import backups into a scratch library and print the merge report (run again with more backups)
+cargo run -p chat-core --release --bin icv-import -- --library path/to/scratch-library path/to/backup.zip
+
+# search index speed on synthetic data (indexing time, query latency, deep search)
+ICV_BENCH_MESSAGES=1000000 cargo test -p chat-core --release --test search bench -- --ignored --nocapture
+
+# parse every inbox message_*.html under a real export (absolute path)
+ICV_SAMPLE_DIR=/abs/path/to/examples cargo test -p chat-core --release --test parse -- --ignored --nocapture
+```
+
+### Project layout
+
+```
+crates/chat-core/      import, merge, storage, search (shared by every app)
+apps/desktop/          React UI (src/) + Tauri shell (src-tauri/)
+```
 
 ## License
 

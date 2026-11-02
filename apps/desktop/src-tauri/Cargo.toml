@@ -1,0 +1,24 @@
+[package]
+name = "instagram-chat-viewer"
+description = "Instagram Chat Viewer desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name (cargo issue #8519 on Windows).
+name = "instagram_chat_viewer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+chat-core = { path = "../../../crates/chat-core" }
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2.8.4"
+tauri-plugin-opener = "2.7.2"
