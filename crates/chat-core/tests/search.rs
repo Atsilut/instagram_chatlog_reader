@@ -485,8 +485,10 @@ fn hidden_chat_is_left_out_of_searches_across_chats() {
     assert!(wide.iter().all(|t| !t.contains("studying")));
     assert!(wide.iter().any(|t| t.contains("class")));
 
-    let mut only = Filters::default();
-    only.thread_id = Some(joy.id);
+    let only = Filters {
+        thread_id: Some(joy.id),
+        ..Filters::default()
+    };
     let mut hits = Vec::new();
     deep_search(
         lib.conn(),
