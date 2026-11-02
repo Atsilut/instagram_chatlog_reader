@@ -1,0 +1,87 @@
+# Builds macOS disk images. This workflow does not create a tag or a GitHub
+# Release. Publish release attaches these packages after the Windows and Linux
+# builds have finished.
+name: macOS build
+
+on:
+  push:
+    branches:
+      - release/mac
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.96
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: test
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Test
+        run: cargo test --workspace
+
+  build:
+    name: ${{ matrix.name }}
+    needs: test
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-aarch64
+            target: aarch64-apple-darwin
+          - name: macos-x64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.96
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build disk image
+        working-directory: apps/desktop
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
+        run: npm run tauri build -- --ci --bundles dmg --target ${{ matrix.target }}
+
+      - name: Upload disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: instagram-chat-viewer-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
