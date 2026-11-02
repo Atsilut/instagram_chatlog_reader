@@ -28,8 +28,11 @@ const HEAD_LEN: usize = 64 * 1024;
 pub type MediaId = i64;
 
 /// A file hashed and written to staging, not yet in the database.
+///
+/// The descriptor is closed after the bytes are written. One chat page can
+/// reference more photos than macOS will let a process keep open.
 pub struct Staged {
-    temp: NamedTempFile,
+    path: tempfile::TempPath,
     pub blake3: [u8; 32],
     pub size: u64,
     pub mime: String,
@@ -99,6 +102,7 @@ impl MediaStore {
             }
             w.flush().at(temp_path(&dir))?;
         }
+        let path = temp.into_temp_path();
 
         let (mime, ext) = detect_type(&head, original_name);
         let (width, height) = if mime.starts_with("image/") {
@@ -111,7 +115,7 @@ impl MediaStore {
         };
 
         Ok(Staged {
-            temp,
+            path,
             blake3: *hasher.finalize().as_bytes(),
             size,
             mime,
@@ -127,26 +131,28 @@ impl MediaStore {
         if let Some(id) = media_id_by_hash(conn, &staged.blake3)? {
             return Ok(id);
         }
-        let hex = blake3::Hash::from_bytes(staged.blake3).to_hex();
-        let rel = format!("{MEDIA_DIR}/{}/{hex}.{}", &hex[..2], staged.ext);
+        let Staged {
+            path,
+            blake3,
+            size,
+            mime,
+            ext,
+            width,
+            height,
+        } = staged;
+        let hex = blake3::Hash::from_bytes(blake3).to_hex();
+        let rel = format!("{MEDIA_DIR}/{}/{hex}.{}", &hex[..2], ext);
         let dest = self.library_root.join(&rel);
         let parent = dest.parent().expect("media path has a parent");
         std::fs::create_dir_all(parent).at(parent)?;
         if !dest.exists() {
-            staged.temp.persist(&dest).map_err(|e| e.error).at(&dest)?;
+            path.persist(&dest).map_err(|e| e.error).at(&dest)?;
         }
 
         conn.execute(
             "INSERT INTO media (blake3, mime, size, store_path, width, height, status)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'present')",
-            params![
-                &staged.blake3[..],
-                staged.mime,
-                staged.size as i64,
-                rel,
-                staged.width,
-                staged.height
-            ],
+            params![&blake3[..], mime, size as i64, rel, width, height],
         )?;
         Ok(conn.last_insert_rowid())
     }
