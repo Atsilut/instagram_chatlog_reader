@@ -247,8 +247,8 @@ export function SearchPanel({ threads, current, allChats, onOpen, onClose }: Pro
               <span className="mt-1 block">Example) searching "love" finds "loved", "have loved" and "kove". Searching "loved" finds "loved", not "love".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 dark:border-zinc-300">
-              <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> The normal search only finds the exact word.
-              <span className="mt-1 block">Example) searching "love" finds "love", not "loved" or "kove".</span>
+              <span className="font-semibold text-amber-300 dark:text-amber-700">Off.</span> The normal search finds the exact word and its plural.
+              <span className="mt-1 block">Example) searching "plan" finds "plans", and "datum" finds "data". It does not find "planned" or "kove".</span>
             </span>
             <span className="mt-2 block border-t border-white/15 pt-2 text-[11px] text-zinc-400 dark:border-zinc-300 dark:text-zinc-500">
               Capitals and accents still match. "lovely" always needs deep search.

@@ -62,7 +62,8 @@ The **Search users** box on the left finds a person by name. Message text is und
 Click **Search**, or press **Ctrl+F** (**Command+F** on a Mac), to search the open chat. **Ctrl+Shift+F** (**Command+Shift+F**) searches every chat. Click a result to jump to that message.
 
 - Capitals and accents still match, so "Cafe" finds "café".
-- **Include similar words** also matches simple typos and English verb forms. Searching "love" can find "loved" and "kove".
+- A singular and its plural always match, so "plan" finds "plans" and "datum" finds "data".
+- **Include similar words** also matches simple typos and English verb forms. Searching "love" can find "loved" and "kove". "plans" still does not find "planned".
 - **Deep search** looks through every message, so "love" can find "lovely". It is slower.
 - You can limit results to one person, or to a range of dates.
 

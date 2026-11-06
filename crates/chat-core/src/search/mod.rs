@@ -4,11 +4,13 @@
 //!
 //! The Tantivy index lives on disk next to the database and is kept in sync from
 //! `index_queue`, which the import fills. Messages are indexed as normalized words
-//! (see [`normalize`]). The normal search matches each query word as itself, as a
-//! form of a base word ("love" finds loved, have loved, used to love; see [`inflect`])
-//! or as a common typo of any of those (a neighbouring key or two swapped letters;
-//! see [`typos`]). An inflected query stays on that form, so "loved" does not find
-//! "love". Korean words also match with a particle attached ("인절미" finds "인절미를").
+//! (see [`normalize`]). The normal search matches each query word as itself and as
+//! its singular or plural ("plan" finds "plans", "datum" finds "data"; see [`inflect`]).
+//! With similar words on, it also matches another form of a base word ("love" finds
+//! loved, have loved, used to love) or a common typo of any of those (a neighbouring
+//! key or two swapped letters; see [`typos`]). An inflected query stays on that form,
+//! so "loved" does not find "love", and "plans" does not find "planned". Korean words
+//! also match with a particle attached ("인절미" finds "인절미를").
 //!
 //! Related words, heavier typos and missing spaces are left to [`deep::deep_search`],
 //! which checks every message.
@@ -38,7 +40,7 @@ use tantivy::{
 
 use crate::error::IoContext;
 use crate::{Error, Result};
-use inflect::query_terms;
+use inflect::{plural_companions, query_terms};
 use normalize::{normalize, space_joins, stretched_forms};
 use typos::{common_typos, is_hangul_jamo};
 
@@ -104,8 +106,10 @@ pub struct SearchQuery {
     #[serde(default)]
     pub offset: usize,
     pub limit: usize,
-    /// Also match English word forms and one-key typos (loved, have loved, lovef).
-    /// When false, only the word itself matches. Korean still matches a longer word that starts with it.
+    /// Also match English verb forms and one-key typos (loved, have loved, lovef).
+    /// When false, the word and its singular or plural still match ("plan" and "plans",
+    /// "datum" and "data"). Other forms and typos do not. Korean still matches a longer
+    /// word that starts with it.
     #[serde(default)]
     pub similar_words: bool,
 }
@@ -380,8 +384,8 @@ impl SearchIndex {
         Some(Box::new(BooleanQuery::new(clauses)))
     }
 
-    /// The word itself. With `similar`, also its forms and simple typos.
-    /// Korean words may carry a particle either way.
+    /// The word itself and its singular or plural. With `similar`, also other forms
+    /// and simple typos. Korean words may carry a particle either way.
     fn word_query(&self, word: &str, similar: bool) -> Box<dyn Query> {
         let hangul = word.chars().any(is_hangul_jamo);
         let one = |w: &str| -> Box<dyn Query> {
@@ -401,6 +405,9 @@ impl SearchIndex {
         } else {
             query_terms(word)
         };
+        if !hangul {
+            terms.extend(plural_companions(word));
+        }
         terms.sort();
         terms.dedup();
         let alternatives = terms

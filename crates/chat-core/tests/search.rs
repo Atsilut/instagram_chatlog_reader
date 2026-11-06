@@ -195,6 +195,65 @@ fn missing_or_extra_spaces_always_match() {
 }
 
 #[test]
+fn singular_and_plural_are_searched_together() {
+    let tmp = tempfile::tempdir().unwrap();
+    let export = write_chat(
+        tmp.path(),
+        "2025-08-01",
+        "joy_111",
+        "Joy",
+        &[
+            m("Joy", "Jul 01, 2025 9:00 am", "one plan left"),
+            m(ME, "Jul 01, 2025 9:01 am", "two plans left"),
+            m("Joy", "Jul 01, 2025 9:02 am", "we planned dinner"),
+            m(ME, "Jul 01, 2025 9:03 am", "one datum point"),
+            m("Joy", "Jul 01, 2025 9:04 am", "all the data"),
+        ],
+        100,
+        &[],
+    );
+    let mut lib = library(tmp.path());
+    run(&mut lib, &[export]);
+    let index = SearchIndex::open(&lib.root().join("search_index"), lib.conn()).unwrap();
+    index.sync(lib.conn(), None, &mut |_| {}).unwrap();
+
+    let contains =
+        |q: SearchQuery, needle: &str| texts(&lib, &index, q).iter().any(|t| t.contains(needle));
+
+    let mut plan = q("plan");
+    plan.similar_words = false;
+    assert!(contains(plan.clone(), "one plan"));
+    assert!(contains(plan.clone(), "two plans"));
+    assert!(!contains(plan, "planned"), "planned needs similar words");
+
+    let mut plans = q("plans");
+    plans.similar_words = false;
+    assert!(contains(plans.clone(), "one plan"));
+    assert!(contains(plans.clone(), "two plans"));
+    assert!(!contains(plans, "planned"));
+
+    let mut datum = q("datum");
+    datum.similar_words = false;
+    assert!(contains(datum.clone(), "datum"));
+    assert!(contains(datum, "data"));
+
+    let mut data = q("data");
+    data.similar_words = false;
+    assert!(contains(data.clone(), "datum"));
+    assert!(contains(data, "data"));
+
+    assert!(contains(q("plan"), "planned"));
+    assert!(contains(q("plan"), "two plans"));
+    assert!(contains(q("plans"), "one plan"));
+    assert!(
+        !contains(q("plans"), "planned"),
+        "the plural does not expand to the past tense"
+    );
+    assert!(contains(q("datum"), "data"));
+    assert!(contains(q("data"), "datum"));
+}
+
+#[test]
 fn similar_words_can_be_turned_off() {
     let tmp = tempfile::tempdir().unwrap();
     let (lib, index) = setup(tmp.path());
