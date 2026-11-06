@@ -76,6 +76,10 @@ jobs:
         working-directory: apps/desktop
         env:
           APPLE_SIGNING_IDENTITY: "-"
+          # GitHub sets CI=true, and the DMG bundler then skips the Finder
+          # layout. Without this, the disk image has no background and the
+          # Applications folder is not placed for the drag-to-install step.
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
         run: npm run tauri build -- --ci --bundles dmg --target ${{ matrix.target }}
 
       - name: Upload disk image
